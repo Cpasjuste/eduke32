@@ -1932,21 +1932,9 @@ DoPlayerHorizon(PLAYERp pp, fix16_t *pq16horiz, fix16_t q16aimvel)
         SET(pp->Flags, PF_LOCK_HORIZ | PF_LOOKING);
     }
 
-    if (TEST_SYNC_KEY(pp, SK_CENTER_VIEW))
+    if (PedanticMode && TEST_SYNC_KEY(pp, SK_CENTER_VIEW))
     {
-        if (PedanticMode)
-            pp->q16horizbase = fix16_from_int(100);
-        else if (pp->q16horizbase > fix16_from_int(100))
-        {
-	    pp->q16horizbase = fix16_ssub(pp->q16horizbase, fix16_from_float(scaleAdjustmentToInterval((HORIZ_SPEED*6))));
-            pp->q16horizbase = fix16_max(pp->q16horizbase, fix16_from_int(100));
-        }
-        else if (pp->q16horizbase < fix16_from_int(100))
-        {
-            pp->q16horizbase = fix16_sadd(pp->q16horizbase, fix16_from_float(scaleAdjustmentToInterval((HORIZ_SPEED*6))));
-            pp->q16horizbase = fix16_min(pp->q16horizbase, fix16_from_int(100));
-        }
-        *pq16horiz = pp->q16horizbase;
+        *pq16horiz = pp->q16horizbase = fix16_from_int(100);
         pp->q16horizoff = 0;
     }
 
@@ -1960,10 +1948,10 @@ DoPlayerHorizon(PLAYERp pp, fix16_t *pq16horiz, fix16_t q16aimvel)
         if (TEST_SYNC_KEY(pp, SK_SNAP_DOWN))
         {
             if (PedanticMode)
-		pp->q16horizbase -= fix16_from_int((HORIZ_SPEED/2));
+                pp->q16horizbase -= fix16_from_int((HORIZ_SPEED/2));
             else
                 pp->q16horizbase = fix16_ssub(pp->q16horizbase, fix16_from_float(scaleAdjustmentToInterval((HORIZ_SPEED/2))));
-	}
+        }
 
         // adjust *pq16horiz positive
         if (TEST_SYNC_KEY(pp, SK_SNAP_UP))
@@ -1975,9 +1963,8 @@ DoPlayerHorizon(PLAYERp pp, fix16_t *pq16horiz, fix16_t q16aimvel)
         }
     }
 
-
     // this is the unlocked type
-    if (TEST_SYNC_KEY(pp, SK_LOOK_UP) || TEST_SYNC_KEY(pp, SK_LOOK_DOWN))
+    if (TEST_SYNC_KEY(pp, SK_LOOK_UP) || TEST_SYNC_KEY(pp, SK_LOOK_DOWN) || (!PedanticMode && TEST_SYNC_KEY(pp, SK_CENTER_VIEW)))
     {
         RESET(pp->Flags, PF_LOCK_HORIZ);
         SET(pp->Flags, PF_LOOKING);
@@ -1986,10 +1973,10 @@ DoPlayerHorizon(PLAYERp pp, fix16_t *pq16horiz, fix16_t q16aimvel)
         if (TEST_SYNC_KEY(pp, SK_LOOK_DOWN))
         {
             if (PedanticMode)
-		pp->q16horizbase -= fix16_from_int(HORIZ_SPEED);
+                pp->q16horizbase -= fix16_from_int(HORIZ_SPEED);
             else
                 pp->q16horizbase = fix16_ssub(pp->q16horizbase, fix16_from_float(scaleAdjustmentToInterval(HORIZ_SPEED)));
-	}
+        }
 
         // adjust *pq16horiz positive
         if (TEST_SYNC_KEY(pp, SK_LOOK_UP))
@@ -1998,7 +1985,10 @@ DoPlayerHorizon(PLAYERp pp, fix16_t *pq16horiz, fix16_t q16aimvel)
                 pp->q16horizbase += fix16_from_int(HORIZ_SPEED);
             else
                 pp->q16horizbase = fix16_sadd(pp->q16horizbase, fix16_from_float(scaleAdjustmentToInterval(HORIZ_SPEED)));
-	}
+        }
+
+        if (TEST_SYNC_KEY(pp, SK_CENTER_VIEW))
+            pp->q16horizoff = 0;
     }
 
 
@@ -2018,7 +2008,7 @@ DoPlayerHorizon(PLAYERp pp, fix16_t *pq16horiz, fix16_t q16aimvel)
                         pp->q16horizbase += fix16_from_int(25 - (fix16_to_int(pp->q16horizbase) >> 2));
                     else
                         pp->q16horizbase = fix16_sadd(pp->q16horizbase, fix16_from_float(scaleAdjustmentToInterval(fix16_to_float(fix16_ssub(fix16_from_int(25), fix16_sdiv(pp->q16horizbase, fix16_from_int(4)))))));
-		}
+                }
             }
             else
             {
