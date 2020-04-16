@@ -618,9 +618,7 @@ KillSprite(int16_t SpriteNum)
         // any Anims attached
         AnimDelete(&u->sz);
         AnimDelete(&sp->z);
-        stopinterpolation(&sp->x);
-        stopinterpolation(&sp->y);
-        stopinterpolation(&sp->z);
+        stopspriteinterpolation(sp);
 
         //if (TEST(u->Flags2, SPR2_DONT_TARGET_OWNER))
         //    Zombies--;
