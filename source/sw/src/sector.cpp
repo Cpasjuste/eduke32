@@ -3354,9 +3354,9 @@ DoSector(void)
             continue;
         }
 
-        if (riding)
+        if (!PedanticMode || riding) // TODO: Consider making this optional
         {
-            // if riding move smoothly
+            // if riding or not in pedantic mode, move smoothly
             // update every time
             MoveSectorObjects(sop, synctics);
         }
