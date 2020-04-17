@@ -7995,6 +7995,7 @@ domovethings(void)
 
     updateinterpolations();                  // Stick at beginning of domovethings
     short_updateinterpolations();            // Stick at beginning of domovethings
+    spriteang_updateinterpolations();        // Stick at beginning of domovethings
     MoveSkipSavePos();
 
 #if 0

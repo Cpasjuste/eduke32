@@ -85,6 +85,9 @@
     <ClCompile Include="..\..\source\sw\src\interpsh.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\source\sw\src\interpsa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\source\sw\src\inv.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -27,6 +27,7 @@ Prepared for public release: 03/28/2005 - Charlie Wiederhold, 3D Realms
 #include "compat.h"
 #include "pragmas.h"
 
+#include "game.h"
 #include "interp.h"
 
 int numinterpolations = 0;
@@ -113,4 +114,5 @@ void togglespriteinterpolation(spritetype *sp, int set)
     func(&sp->x);
     func(&sp->y);
     func(&sp->z);
+    (set ? spriteang_setinterpolation : spriteang_stopinterpolation)(sp-sprite);
 }

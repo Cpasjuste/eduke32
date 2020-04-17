@@ -1511,6 +1511,8 @@ typedef struct
     short Vis;              // Shading upgrade, for shooting, etc...
     SWBOOL DidAlert;          // Has actor done his alert noise before?
 
+    int16_t oangdiff;      // Used for interpolating sprite angles
+
     uint8_t filler;
 } USER,*USERp;
 
@@ -2171,6 +2173,11 @@ void short_stopinterpolation(short *posptr);
 void short_updateinterpolations(void);
 void short_dointerpolations(int smoothratio);
 void short_restoreinterpolations(void);
+void spriteang_setinterpolation(int16_t spritenum);
+void spriteang_stopinterpolation(int16_t spritenum);
+void spriteang_updateinterpolations(void);
+void spriteang_dointerpolations(int smoothratio);
+void spriteang_restoreinterpolations(void);
 
 enum SoundType
 {

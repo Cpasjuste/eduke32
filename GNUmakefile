@@ -774,6 +774,7 @@ sw_game_objs := \
     hornet.cpp \
     interp.cpp \
     interpsh.cpp \
+    interpsa.cpp \
     inv.cpp \
     jplayer.cpp \
     jsector.cpp \

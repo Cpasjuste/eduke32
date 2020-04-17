@@ -2301,6 +2301,7 @@ drawscreen(PLAYERp pp)
     {
         dointerpolations(smoothratio);                      // Stick at beginning of drawscreen
         short_dointerpolations(smoothratio);                      // Stick at beginning of drawscreen
+        spriteang_dointerpolations(smoothratio);                      // Stick at beginning of drawscreen
     }
 
     // TENSW: when rendering with prediction, the only thing that counts should
@@ -2581,6 +2582,7 @@ drawscreen(PLAYERp pp)
 
     restoreinterpolations();                 // Stick at end of drawscreen
     short_restoreinterpolations();                 // Stick at end of drawscreen
+    spriteang_restoreinterpolations();                 // Stick at end of drawscreen
 
     PostDraw();
     DrawScreen = FALSE;

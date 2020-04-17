@@ -208,6 +208,7 @@
     <ClCompile Include="..\..\source\sw\src\hornet.cpp" />
     <ClCompile Include="..\..\source\sw\src\interp.cpp" />
     <ClCompile Include="..\..\source\sw\src\interpsh.cpp" />
+    <ClCompile Include="..\..\source\sw\src\interpsa.cpp" />
     <ClCompile Include="..\..\source\sw\src\inv.cpp" />
     <ClCompile Include="..\..\source\sw\src\jbhlp.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
