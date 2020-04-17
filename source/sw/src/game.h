@@ -2213,6 +2213,8 @@ extern char ds[];
 extern short Skill;
 extern int GodMode;
 
+extern SWBOOL ReloadPrompt;
+
 extern int x_min_bound, y_min_bound, x_max_bound, y_max_bound;
 
 //extern unsigned char synctics, lastsynctics;
@@ -2279,6 +2281,7 @@ void sendlogoff(void);
 
 extern int ototalclock, save_totalclock, gotlastpacketclock,smoothratio;
 extern SWBOOL ready2send;
+extern SWBOOL GamePaused;
 
 // local copy of variables updated by faketimerhandler
 extern int locselectedgun;
