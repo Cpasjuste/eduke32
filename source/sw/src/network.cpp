@@ -73,6 +73,8 @@ extern SWBOOL QuitFlag;
 
 #define TIMERUPDATESIZ 32
 
+#define MASTER_SENDS_ONCE 1
+
 //SW_PACKET fsync;
 
 //Local multiplayer variables
@@ -1200,28 +1202,34 @@ faketimerhandler(void)
         return;
     }
 
+#if 0
     // This allows packet-resends
-    //for (i = connecthead; i >= 0; i = connectpoint2[i])
-    //    {
-    //    if ( /* (!playerquitflag[i]) && */ (Player[i].movefifoend <= movefifosendplc))
-    //        {
-    //        packbuf[0] = 127;
-    //        for (i = connectpoint2[connecthead]; i >= 0; i = connectpoint2[i])
-    //            {
-    //             /* if (!playerquitflag[i]) */ sendpacket(i, packbuf, 1);
-    //            }
-    //        return;
-    //        }
-    //    }
+    for (i = connecthead; i >= 0; i = connectpoint2[i])
+    {
+        if ( /* (!playerquitflag[i]) && */ (Player[i].movefifoend <= movefifosendplc))
+        {
+            packbuf[0] = PACKET_TYPE_NULL_PACKET;
+            for (i = connectpoint2[connecthead]; i >= 0; i = connectpoint2[i])
+            {
+                 /* if (!playerquitflag[i]) */ sendpacket(i, packbuf, 1);
+            }
+            return;
+        }
+    }
+#endif
 
     // I am MASTER...
     while (1)
     {
+#if MASTER_SENDS_ONCE
+        movefifosendplc = pp->movefifoend - 1;
+#else
         for (i = connecthead; i >= 0; i = connectpoint2[i])
         {
             if (/* (!playerquitflag[i]) && */ (Player[i].movefifoend <= movefifosendplc))
                 return;
         }
+#endif
 
         packbuf[0] = PACKET_TYPE_MASTER_TO_SLAVE;
         j = 1;
@@ -1273,7 +1281,11 @@ faketimerhandler(void)
         if (TEST(Player[myconnectindex].inputfifo[movefifosendplc & (MOVEFIFOSIZ - 1)].bits, BIT(SK_QUIT_GAME)))
             QuitFlag = TRUE;
 
+#if MASTER_SENDS_ONCE
+        return;
+#else
         movefifosendplc += MovesPerPacket;
+#endif
     }
 }
 
