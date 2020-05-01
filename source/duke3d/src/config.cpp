@@ -251,7 +251,7 @@ void CONFIG_SetDefaults(void)
     ud.setup.fullscreen       = 1;
     ud.setup.usemouse         = 1;
 #ifdef __SWITCH__
-    ud.setup.overclock        = 0;
+    ud.setup.overclock        = 1;
 #endif
 
     ud.althud                 = 1;
