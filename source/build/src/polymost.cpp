@@ -989,7 +989,7 @@ void polymost_glinit()
     currentTextureID = 0;
 
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &tilesheetSize);
-#if (defined _MSC_VER) || (!defined BITNESS64) || defined(__SWITCH__)
+#if (defined _MSC_VER) || (!defined BITNESS64)
     if (tilesheetSize > 8192)
         tilesheetSize = 8192;
 #endif
