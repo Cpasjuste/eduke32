@@ -250,6 +250,9 @@ void CONFIG_SetDefaults(void)
     ud.setup.noautoload       = 1;
     ud.setup.fullscreen       = 1;
     ud.setup.usemouse         = 1;
+#ifdef __SWITCH__
+    ud.setup.overclock        = 0;
+#endif
 
     ud.althud                 = 1;
     ud.angleinterpolation     = 0;
@@ -805,6 +808,9 @@ int CONFIG_ReadSetup(void)
     SCRIPT_GetNumber(ud.config.scripthandle, "Setup", "ConfigVersion", &ud.configversion);
     SCRIPT_GetNumber(ud.config.scripthandle, "Setup", "ForceSetup", &ud.setup.forcesetup);
     SCRIPT_GetNumber(ud.config.scripthandle, "Setup", "NoAutoLoad", &ud.setup.noautoload);
+#ifdef __SWITCH__
+    SCRIPT_GetNumber(ud.config.scripthandle, "Setup", "Overclock", &ud.setup.overclock);
+#endif
 
     int32_t cachesize;
     SCRIPT_GetNumber(ud.config.scripthandle, "Setup", "CacheSize", &cachesize);
@@ -947,6 +953,9 @@ void CONFIG_WriteSetup(uint32_t flags)
     SCRIPT_PutNumber(ud.config.scripthandle, "Setup", "ConfigVersion", BYTEVERSION_EDUKE32, FALSE, FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Setup", "ForceSetup", ud.setup.forcesetup, FALSE, FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Setup", "NoAutoLoad", ud.setup.noautoload, FALSE, FALSE);
+#ifdef __SWITCH__
+    SCRIPT_PutNumber(ud.config.scripthandle, "Setup", "Overclock", ud.setup.overclock, FALSE, FALSE);
+#endif
 
 #ifdef POLYMER
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "Polymer", glrendmode == REND_POLYMER, FALSE, FALSE);

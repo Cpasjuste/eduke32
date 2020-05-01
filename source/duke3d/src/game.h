@@ -177,6 +177,9 @@ typedef struct ud_setup_s {
     int32_t bpp;
     int32_t forcesetup;
     int32_t noautoload;
+#ifdef __SWITCH__
+	int32_t overclock;
+#endif
 } ud_setup_t;
 
 typedef struct {

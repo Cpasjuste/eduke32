@@ -50,6 +50,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 # include "lunatic_game.h"
 #endif
 
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
+
 #include "vfs.h"
 
 // Uncomment to prevent anything except mirrors from drawing. It is sensible to
@@ -6530,6 +6534,42 @@ int app_main(int argc, char const * const * argv)
     int const readSetup =
 #endif
     CONFIG_ReadSetup();
+
+#ifdef __SWITCH__
+    if(ud.setup.overclock > 0)
+    {
+        if (hosversionBefore(8, 0, 0))
+        {
+            if (R_SUCCEEDED(pcvInitialize()))
+            {
+                printf("SWITCH: overclock enabled (version < 8.0.0)\n");
+                pcvSetClockRate(PcvModule_CpuBus, 1785000000);
+                pcvSetClockRate(PcvModule_GPU, 768000000);
+                pcvSetClockRate(PcvModule_EMC, 1600000000);
+            }
+        }
+        else
+        {
+            if (R_SUCCEEDED(clkrstInitialize()))
+            {
+                printf("SWITCH: overclock enabled (version >= 8.0.0)\n");
+                ClkrstSession session;
+                clkrstOpenSession(&session, PcvModuleId_CpuBus, 3);
+                if(!R_SUCCEEDED(clkrstSetClockRate(&session, 1785000000)))
+                    printf("SWITCH: could not change cpu speed\n");
+                clkrstCloseSession(&session);
+                clkrstOpenSession(&session, PcvModuleId_GPU, 3);
+                if(!R_SUCCEEDED(clkrstSetClockRate(&session, 768000000)))
+                    printf("SWITCH: could not change cpu speed\n");
+                clkrstCloseSession(&session);
+                clkrstOpenSession(&session, PcvModuleId_EMC, 3);
+                if(!R_SUCCEEDED(clkrstSetClockRate(&session, 1600000000)))
+                    printf("SWITCH: could not change cpu speed\n");
+                clkrstCloseSession(&session);
+            }
+        }
+    }
+#endif
 
 #if defined(_WIN32) && !defined (EDUKE32_STANDALONE)
 

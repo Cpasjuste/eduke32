@@ -16,6 +16,11 @@ Ken Silverman's official web site: http://www.advsys.net/ken
 #include "polymost.h"
 #include "tilepacker.h"
 
+#ifdef __SWITCH__
+#define nexttoward nextafter
+#define nexttowardf nextafterf
+#endif
+
 extern char textfont[2048], smalltextfont[2048];
 
 int32_t rendmode=0;
