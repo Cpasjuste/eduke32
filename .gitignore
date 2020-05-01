@@ -65,3 +65,9 @@ project.xcworkspace/
 .DS_Store
 ._*
 /source/voidwrap/sdk/
+
+# Nintendo Switch
+eduke32.nro
+eduke32.nacp
+mapster32.nro
+mapster32.nacp

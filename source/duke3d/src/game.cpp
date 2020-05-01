@@ -337,6 +337,10 @@ void G_GameExit(const char *msg)
 
     Bfflush(NULL);
 
+#ifdef __SWITCH__
+	uninitsystem();
+#endif
+
     exit(EXIT_SUCCESS);
 }
 

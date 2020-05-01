@@ -300,7 +300,7 @@
 
 ////////// Architecture detection //////////
 
-#if defined __arm__ || defined __aarch64__
+#if defined __arm__ || defined __aarch64__ && !defined __SWITCH__
 # define EDUKE32_CPU_ARM
 #elif defined __i386 || defined __i386__ || defined _M_IX86 || defined _M_X64 || defined __x86_64__
 # define EDUKE32_CPU_X86
@@ -390,7 +390,7 @@ defined __x86_64__ || defined __amd64__ || defined _M_X64 || defined _M_IA64 || 
 #  define B_BIG_ENDIAN    1
 # endif
 
-#elif defined(_WIN32) || defined(SKYOS) || defined(__SYLLABLE__)
+#elif defined(_WIN32) || defined(SKYOS) || defined(__SYLLABLE__) || defined(__SWITCH__)
 # define B_LITTLE_ENDIAN 1
 # define B_BIG_ENDIAN    0
 #endif
