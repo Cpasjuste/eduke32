@@ -185,6 +185,8 @@ int SDLDrv_PCM_Init(int *mixrate, int *numchannels, void * initdata)
     int chunksize = 512;
 #ifdef __ANDROID__
     chunksize = droidinfo.audio_buffer_size;
+#elif __SWITCH__
+    chunksize = 1024;
 #endif
 
     SDL_AudioSpec spec = {};

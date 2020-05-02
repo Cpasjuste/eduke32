@@ -642,7 +642,7 @@ size_t Bgetsysmemsize(void)
     }
     else initprintf("Bgetsysmemsize(): unable to load KERNEL32.DLL!\n");
 #elif defined(__SWITCH__)
-    svcGetInfo(&siz, InfoType_UsedNonSystemMemorySize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&siz, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
     printf("SWITCH: heap size: %i MB\n", (int) (siz / 1e+6));
 #elif (defined(_SC_PAGE_SIZE) || defined(_SC_PAGESIZE)) && defined(_SC_PHYS_PAGES) && !defined(GEKKO)
 #ifdef _SC_PAGE_SIZE
