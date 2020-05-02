@@ -52,7 +52,7 @@ static FORCE_INLINE void Menu_StartTextInput()
 {
     KB_FlushKeyboardQueue();
     KB_ClearKeysDown();
-#if defined EDUKE32_TOUCH_DEVICES && defined SDL_MAJOR_VERSION && SDL_MAJOR_VERSION > 1
+#if (defined EDUKE32_TOUCH_DEVICES || defined __SWITCH__) && defined SDL_MAJOR_VERSION && SDL_MAJOR_VERSION > 1
 # if defined __ANDROID__
     AndroidShowKeyboard(1);
 # else
@@ -63,7 +63,7 @@ static FORCE_INLINE void Menu_StartTextInput()
 
 static FORCE_INLINE void Menu_StopTextInput()
 {
-#if defined EDUKE32_TOUCH_DEVICES && defined SDL_MAJOR_VERSION && SDL_MAJOR_VERSION > 1
+#if (defined EDUKE32_TOUCH_DEVICES || defined __SWITCH__) && defined SDL_MAJOR_VERSION && SDL_MAJOR_VERSION > 1
 # if defined __ANDROID__
     AndroidShowKeyboard(0);
 # else

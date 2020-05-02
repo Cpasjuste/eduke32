@@ -685,7 +685,6 @@ int32_t initsystem(void)
 
     if (!novideo)
     {
-#ifndef __SWITCH__
 #ifdef USE_OPENGL
         if (SDL_GL_LoadLibrary(0))
         {
@@ -698,7 +697,6 @@ int32_t initsystem(void)
             initprintf("Failed loading GLU.  GL modes will be unavailable.\n");
             nogl = 1;
         }
-#endif
 #endif
 #endif
 
@@ -736,7 +734,6 @@ void uninitsystem(void)
 
     SDL_Quit();
 
-#ifndef __SWITCH__
 #ifdef USE_OPENGL
 # if SDL_MAJOR_VERSION!=1
     SDL_GL_UnloadLibrary();
@@ -744,7 +741,6 @@ void uninitsystem(void)
 # ifdef POLYMER
     unloadglulibrary();
 # endif
-#endif
 #endif
 
 #ifdef __SWITCH__
