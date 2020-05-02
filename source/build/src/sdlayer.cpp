@@ -38,8 +38,7 @@
 #elif defined _WIN32
 # include "winbits.h"
 #elif defined __SWITCH__
-# include <switch.h>
-static int nxlink_sock = -1;
+# include "switchbits.h"
 #endif
 
 #include "vfs.h"
@@ -451,10 +450,6 @@ int main(int argc, char *argv[])
         return eduke32_return_value;
     }
 #endif
-#ifdef __SWITCH__
-    socketInitializeDefault();
-    nxlink_sock = nxlinkStdio();
-#endif
 
     sdlayer_sethints();
 
@@ -498,6 +493,8 @@ int main(int argc, char *argv[])
 
 #elif defined(GEKKO)
     wii_open();
+#elif defined(__SWITCH__)
+    switch_open();
 #elif defined(HAVE_GTK2)
     // Pre-initialize SDL video system in order to make sure XInitThreads() is called
     // before GTK starts talking to X11.
@@ -751,9 +748,7 @@ void uninitsystem(void)
 #endif
 
 #ifdef __SWITCH__
-    if (nxlink_sock != -1)
-        close(nxlink_sock);
-    socketExit();
+    switch_close();
 #endif
 }
 

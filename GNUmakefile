@@ -325,6 +325,7 @@ ifeq ($(PLATFORM),WII)
     LINKERFLAGS += -Wl,-wrap,c_default_exceptionhandler
 endif
 ifeq ($(PLATFORM),SWITCH)
+    engine_objs += switchbits.cpp
     COMPILERFLAGS += -Iplatform/Switch/glu/include -O$(OPTLEVEL)
     LINKERFLAGS += -Lplatform/Switch/glu/lib
     LIBS += -lGLU -lFLAC -lvorbisfile -lvorbis -logg -lmpg123 -lmodplug -lm -lz
