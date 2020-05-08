@@ -33,7 +33,7 @@ void switch_enable_oc(int enable)
             {
                 printf("SWITCH: overclock enabled (version < 8.0.0)\n");
                 pcvSetClockRate(PcvModule_CpuBus, 1785000000);
-                pcvSetClockRate(PcvModule_GPU, 768000000);
+                pcvSetClockRate(PcvModule_GPU, 921000000);
                 pcvSetClockRate(PcvModule_EMC, 1600000000);
             }
         }
@@ -44,16 +44,13 @@ void switch_enable_oc(int enable)
                 printf("SWITCH: overclock enabled (version >= 8.0.0)\n");
                 ClkrstSession session;
                 clkrstOpenSession(&session, PcvModuleId_CpuBus, 3);
-                if(!R_SUCCEEDED(clkrstSetClockRate(&session, 1785000000)))
-                    printf("SWITCH: could not change cpu speed\n");
+                clkrstSetClockRate(&session, 1785000000);
                 clkrstCloseSession(&session);
                 clkrstOpenSession(&session, PcvModuleId_GPU, 3);
-                if(!R_SUCCEEDED(clkrstSetClockRate(&session, 768000000)))
-                    printf("SWITCH: could not change cpu speed\n");
+                clkrstSetClockRate(&session, 921000000);
                 clkrstCloseSession(&session);
                 clkrstOpenSession(&session, PcvModuleId_EMC, 3);
-                if(!R_SUCCEEDED(clkrstSetClockRate(&session, 1600000000)))
-                    printf("SWITCH: could not change cpu speed\n");
+                clkrstSetClockRate(&session, 1600000000);
                 clkrstCloseSession(&session);
             }
         }
