@@ -406,7 +406,6 @@ else ifeq ($(PLATFORM),WII)
     override HAVE_FLAC := 0
     SDL_TARGET := 1
 else ifeq ($(PLATFORM),SWITCH)
-    override NETCODE := 0
     override HAVE_GTK2 := 0
     override NOASM := 1
     PKG_CONFIG := $(DEVKITPRO)/portlibs/switch/bin/aarch64-none-elf-pkg-config
