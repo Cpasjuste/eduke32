@@ -513,8 +513,8 @@ PlaySong(char *song_file_name, int cdaudio_track, SWBOOL loop, SWBOOL restart)
 
                     if (LoadSong(waveformtrack))
                     {
-                        SongVoice = FX_Play(SongPtr, SongLength, 0, 0, 0,
-                                                      255, 255, 255, FX_MUSIC_PRIORITY, fix16_one, MUSIC_ID);
+                        SongVoice = FX_Play(SongPtr, SongLength, loop ? FX_LOOP : FX_ONESHOT, 0, 0,
+                                                gs.MusicVolume, gs.MusicVolume, gs.MusicVolume, FX_MUSIC_PRIORITY, fix16_one, MUSIC_ID);
                         if (SongVoice > FX_Ok)
                         {
                             SongType = SongTypeWave;
@@ -551,8 +551,8 @@ PlaySong(char *song_file_name, int cdaudio_track, SWBOOL loop, SWBOOL restart)
     }
     else
     {
-        SongVoice = FX_Play(SongPtr, SongLength, 0, 0, 0,
-                                      255, 255, 255, FX_MUSIC_PRIORITY, fix16_one, MUSIC_ID);
+        SongVoice = FX_Play(SongPtr, SongLength, loop ? FX_LOOP : FX_ONESHOT, 0, 0,
+                                gs.MusicVolume, gs.MusicVolume, gs.MusicVolume, FX_MUSIC_PRIORITY, fix16_one, MUSIC_ID);
         if (SongVoice > FX_Ok)
         {
             SongType = SongTypeWave;
@@ -610,11 +610,21 @@ PauseSong(SWBOOL pauseon)
 void
 SetSongVolume(int volume)
 {
+    if (SongType == SongTypeWave && SongVoice > 0)
+        FX_SetPan(SongVoice, volume, volume, volume);
+
+    MUSIC_SetVolume(volume);
 }
 
 SWBOOL
 SongIsPlaying(void)
 {
+    if (!gs.MusicOn)
+        return FALSE;
+
+    if (SongType == SongTypeWave && SongVoice >= 0)
+        return FX_SoundActive(SongVoice);
+
     return FALSE;
 }
 

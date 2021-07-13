@@ -35,7 +35,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 extern "C" {
 #endif
 
-// KEEPINSYNC lunatic/con_lang.lua
 #define MAXSOUNDS           4096
 #define MAXSOUNDINSTANCES   8
 #define LOUDESTVOLUME       111
@@ -54,7 +53,7 @@ typedef struct
 {
     char *    ptr, *filename;                // 8b/16b
     int32_t   length, num, siz;              // 12b
-    float     volume;                        // 4b
+    fix16_t   volume;                        // 4b
     assvoice_t voices[MAXSOUNDINSTANCES];  // 64b
     int16_t   ps, pe, vo;                    // 6b
     char      pr, m;                         // 2b
@@ -63,6 +62,8 @@ typedef struct
 extern char g_soundlocks[MAXSOUNDS];
 extern sound_t g_sounds[MAXSOUNDS];
 extern int32_t g_numEnvSoundsPlaying,g_highestSoundIdx;
+
+extern int32_t MusicIsWaveform;
 
 int A_CheckSoundPlaying(int spriteNum,int soundNum);
 int A_PlaySound(int soundNum, int spriteNum);
@@ -73,6 +74,8 @@ void S_Cleanup(void);
 void S_ClearSoundLocks(void);
 int32_t S_LoadSound(uint32_t num);
 void cacheAllSounds(void);
+int32_t S_DefineSound(int sndidx, const char* name, int minpitch, int maxpitch, int priority, int type, int distance, float volume);
+int32_t S_DefineMusic(const char* ID, const char* name);
 void S_MenuSound(void);
 void S_MusicShutdown(void);
 void S_MusicStartup(void);

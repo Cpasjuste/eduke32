@@ -43,7 +43,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include "keyboard.h"
 #include "scriptfile.h"
-#include "xxhash.h"
 
 #include "sounds_mapster32.h"
 #include "fx_man.h"
@@ -54,10 +53,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include "m32script.h"
 #include "m32def.h"
-
-#ifdef LUNATIC
-# include "lunatic_editor.h"
-#endif
 
 #include <signal.h>
 
@@ -96,10 +91,6 @@ static int32_t spnoclip=1;
 
 static char const *default_tiles_cfg = "tiles.cfg";
 static int32_t pathsearchmode_oninit;
-
-#ifdef LUNATIC
-static L_State g_EmState;
-#endif
 
 #pragma pack(push,1)
 sound_t g_sounds[MAXSOUNDS];
@@ -2688,6 +2679,10 @@ static int32_t m32gettile(int32_t idInitialTile)
         {
             g_mouseBits &= ~32;
             iTopLeftTile += (nXTiles*scrollamount);
+        }
+        else if (bstatus&48 && scrollmode)
+        {
+            g_mouseBits &= ~48;
         }
 
         mtile = tileNum = searchx/zoomsz + ((searchy-moffset)/zoomsz)*nXTiles + iTopLeftTile;
@@ -5507,7 +5502,7 @@ static void Keys3d(void)
                 Bsprintf(tempbuf,"%s Z %s", AIMING_AT_CEILING?"CEILING":"FLOOR", eitherCTRL?"512":"");
             else if (eitherSHIFT)
                 Bsprintf(tempbuf,"PAN");
-            else if (eitherCTRL)
+            else if (keystatus[KEYSC_LCTRL])
                 Bsprintf(tempbuf,"SLOPE");
             break;
         case SEARCH_SPRITE:
@@ -5914,7 +5909,7 @@ static void Keys3d(void)
 
     mouseaction=0;
 
-    if (eitherCTRL && !eitherSHIFT && (bstatus&1) && AIMING_AT_CEILING_OR_FLOOR)
+    if (keystatus[KEYSC_LCTRL] && !eitherSHIFT && (bstatus&1) && AIMING_AT_CEILING_OR_FLOOR)
     {
         g_mousePos.x=0; mskip=1;
         if (g_mousePos.y)
@@ -7593,12 +7588,6 @@ static void Keys2d(void)
     {
         FuncMenu();
     }
-#ifdef LUNATIC
-    else if (keystatus[KEYSC_SEMI] && PRESSED_KEYSC(F))  // ; F
-    {
-        LuaFuncMenu();
-    }
-#endif
     else if (!eitherALT && PRESSED_KEYSC(F))
     {
         if (pointhighlight < 16384 && tcursectornum>=0 && graphicsmode)
@@ -8001,19 +7990,12 @@ static void G_ShowParameterHelp(void)
 extern char forcegl;
 #endif
 
-#ifdef LUNATIC
-char const * const * g_argv;
-#endif
-
 static void G_CheckCommandLine(int32_t argc, char const * const * argv)
 {
     int32_t i = 1, j, maxlen=0, *lengths;
     const char *c, *k;
 
     mapster32_fullpath = argv[0];
-#ifdef LUNATIC
-    g_argv = argv;
-#endif
 
 #ifdef HAVE_CLIPSHAPE_FEATURE
     // pre-form the default 10 clipmaps
@@ -8028,6 +8010,13 @@ static void G_CheckCommandLine(int32_t argc, char const * const * argv)
 
     if (argc <= 1)
         return;
+    else
+    {
+        initprintf("Application parameters: ");
+        while (i < argc)
+            initprintf("%s ", argv[i++]);
+        initprintf("\n");
+    }
 
     lengths = (int32_t *)Xmalloc(argc*sizeof(int32_t));
     for (j=1; j<argc; j++)
@@ -8040,6 +8029,7 @@ static void G_CheckCommandLine(int32_t argc, char const * const * argv)
     testplay_addparam[0] = 0;
 
     j = 0;
+    i = 1;
 
     while (i < argc)
     {
@@ -8424,6 +8414,90 @@ static int osdcmd_quit(osdcmdptr_t UNUSED(parm))
     Bfflush(NULL);
 
     exit(EXIT_SUCCESS);
+}
+
+static int osdcmd_artdump(osdcmdptr_t parm)
+{
+    UNREFERENCED_CONST_PARAMETER(parm);
+
+    BFILE *f = Bfopen("tilesxxx.art", "wb");
+    uint32_t first = 0;
+    uint32_t last = MAXUSERTILES-1;
+    uint32_t numtiles = 0;
+
+    if (parm->numparms >= 1)
+        first = Batol(parm->parms[0]);
+
+    if (parm->numparms >= 2)
+        last = Batol(parm->parms[1]);
+
+    if (first >= MAXUSERTILES || last >= MAXUSERTILES)
+        return OSDCMD_SHOWHELP;
+
+    for (uint32_t i = last; i > first; --i)
+        if (tileLoad(i))
+        {
+            numtiles = i + 1;
+            break;
+        }
+
+    int32_t s32;
+
+    // header
+    s32 = B_LITTLE32(0x4c495542);
+    Bfwrite(&s32, sizeof(int32_t), 1, f);
+    s32 = B_LITTLE32(0x54524144);
+    Bfwrite(&s32, sizeof(int32_t), 1, f);
+
+    // artversion
+    s32 = 1;
+    Bfwrite(&s32, sizeof(int32_t), 1, f);
+
+    // numtiles
+    Bfwrite(&numtiles, sizeof(int32_t), 1, f);
+
+    // localtilestart
+    s32 = first;
+    Bfwrite(&s32, sizeof(int32_t), 1, f);
+
+    // localtileend
+    s32 = numtiles - 1;
+    Bfwrite(&s32, sizeof(int32_t), 1, f);  // tileend
+
+    // tilesizx
+    for (uint32_t i = first; i < numtiles; ++i)
+        Bfwrite(&tilesiz[i].x, sizeof(int16_t), 1, f);
+
+    // tilesizy
+    for (uint32_t i = first; i < numtiles; ++i)
+        Bfwrite(&tilesiz[i].y, sizeof(int16_t), 1, f);
+
+    // picanm
+    for (uint32_t i = first; i < numtiles; ++i)
+    {
+        picanm_t p = picanm[i];
+
+        // undo picanm reorder...
+        p.num &= ~192;
+        p.num |= p.sf & 192;
+        p.sf &= 0x0F;
+
+        // do not write the tileflags member
+        Bfwrite(&p.num, sizeof(uint8_t), 1, f);
+        Bfwrite(&p.xofs, sizeof(int8_t), 1, f);
+        Bfwrite(&p.yofs, sizeof(int8_t), 1, f);
+        Bfwrite(&p.sf, sizeof(uint8_t), 1, f);
+    }
+
+    for (uint32_t i = first; i < numtiles; ++i)
+    {
+        tileLoad(i);
+        Bfwrite((void *)waloff[i], tilesiz[i].x * tilesiz[i].y, 1, f);
+    }
+
+    Bfclose(f);
+
+    return OSDCMD_OK;
 }
 
 static int osdcmd_editorgridextent(osdcmdptr_t parm)
@@ -8891,34 +8965,6 @@ static void SaveInHistory(const char *commandstr)
     }
 }
 
-#ifdef LUNATIC
-static int osdcmd_lua(osdcmdptr_t parm)
-{
-    // Should be used like
-    // lua "lua code..."
-    // (the quotes making the whole string passed as one argument)
-
-    int32_t ret;
-
-    if (parm->numparms != 1)
-        return OSDCMD_SHOWHELP;
-
-    if (!L_IsInitialized(&g_EmState))
-    {
-        OSD_Printf("Lua state is not initialized.\n");
-        return OSDCMD_OK;
-    }
-
-    ret = L_RunString(&g_EmState, parm->parms[0], -1, "console");
-    if (ret != 0)
-        OSD_Printf("Error running the Lua code (error code %d)\n", ret);
-    else
-        SaveInHistory(parm->raw);
-
-    return OSDCMD_OK;
-}
-#endif
-
 // M32 script vvv
 static int osdcmd_include(osdcmdptr_t parm)
 {
@@ -9118,6 +9164,8 @@ static int32_t registerosdcommands(void)
     OSD_RegisterFunction("quit","quit: exits the editor immediately", osdcmd_quit);
     OSD_RegisterFunction("exit","exit: exits the editor immediately", osdcmd_quit);
 
+    OSD_RegisterFunction("artdump","dump art to disk", osdcmd_artdump);
+
     OSD_RegisterFunction("sensitivity","sensitivity <value>: changes the mouse sensitivity", osdcmd_sensitivity);
 
     //PK
@@ -9141,9 +9189,6 @@ static int32_t registerosdcommands(void)
     OSD_RegisterFunction("tint", "tint <pal> <r> <g> <b> <flags>: queries or sets hightile tinting", osdcmd_tint);
 #endif
 
-#ifdef LUNATIC
-    OSD_RegisterFunction("lua", "lua \"Lua code...\": runs Lua code", osdcmd_lua);
-#endif
     // M32 script
     OSD_RegisterFunction("include", "include <filenames...>: compiles one or more M32 script files", osdcmd_include);
     OSD_RegisterFunction("do", "do (m32 script ...): executes M32 script statements", osdcmd_do);
@@ -9869,7 +9914,7 @@ static int32_t loadconsounds(const char *fn)
     for (char * m : g_scriptModules)
     {
         parseconsounds_include(m, NULL, "null");
-        free(m);
+        Bfree(m);
     }
     g_scriptModules.clear();
 
@@ -9991,22 +10036,6 @@ int32_t ExtPostStartupWindow(void)
     ReadHelpFile("m32help.hlp");
 
     G_InitMultiPsky(CLOUDYOCEAN, MOONSKY1, BIGORBIT1, LA);
-
-#ifdef LUNATIC
-    if (Em_CreateState(&g_EmState) == 0)
-    {
-        extern const char luaJIT_BC__defs_editor[];
-
-        int32_t i = L_RunString(&g_EmState, luaJIT_BC__defs_editor,
-                                LUNATIC_DEFS_M32_BC_SIZE, "_defs_editor.lua");
-        if (i != 0)
-        {
-            Em_DestroyState(&g_EmState);
-            initprintf("Lunatic: Error preparing global Lua state (code %d)\n", i);
-            return -1;
-        }
-    }
-#endif
 
     return 0;
 }

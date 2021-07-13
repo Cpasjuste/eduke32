@@ -204,7 +204,7 @@ int32_t wm_ynbox(const char *name, const char *fmt, ...)
 //
 void wm_setapptitle(const char *name)
 {
-    if (name)
+    if (name != apptitle)
         Bstrncpyz(apptitle, name, sizeof(apptitle));
 
     if (hWindow) SetWindowText(hWindow, apptitle);
@@ -556,17 +556,19 @@ void system_getcvars(void)
 //
 // initprintf() -- prints a formatted string to the initialization window
 //
-void initprintf(const char *f, ...)
+int initprintf(const char *f, ...)
 {
     va_list va;
     char buf[2048];
 
     va_start(va, f);
-    Bvsnprintf(buf, sizeof(buf), f, va);
+    int len = Bvsnprintf(buf, sizeof(buf), f, va);
     va_end(va);
 
     osdstrings.append(Xstrdup(buf));
     initputs(buf);
+
+    return len;
 }
 
 
@@ -601,7 +603,7 @@ void initputs(const char *buf)
 //
 // debugprintf() -- sends a formatted debug string to the debugger
 //
-void debugprintf(const char *f, ...)
+int debugprintf(const char *f, ...)
 {
 #if 0 // def DEBUGGINGAIDS
     va_list va;
@@ -610,12 +612,14 @@ void debugprintf(const char *f, ...)
     if (!IsDebuggerPresent()) return;
 
     va_start(va,f);
-    Bvsnprintf(buf, 1024, f, va);
+    int len = Bvsnprintf(buf, 1024, f, va);
     va_end(va);
 
     OutputDebugString(buf);
+    return len;
 #else
     UNREFERENCED_PARAMETER(f);
+    return 0;
 #endif
 }
 
@@ -675,14 +679,14 @@ int32_t handleevents(void)
 //
 // initinput() -- init input system
 //
-int32_t initinput(void)
+int32_t initinput(void(*hotplugCallback)(void) /*= NULL*/)
 {
     g_mouseEnabled=0;
     memset(keystatus, 0, sizeof(keystatus));
 
     g_keyFIFOend = g_keyAsciiPos = g_keyAsciiEnd = 0;
 
-    inputdevices = 1|2;
+    inputdevices = DEV_KEYBOARD | DEV_MOUSE;
     joystick.numAxes = joystick.numButtons = joystick.numHats=0;
 
     GetKeyNames();
@@ -874,7 +878,7 @@ static BOOL CALLBACK InitDirectInput_enum(LPCDIDEVICEINSTANCE lpddi, LPVOID pvRe
     if ((lpddi->dwDevType&0xff) != DIDEVTYPE_JOYSTICK)
         return DIENUM_CONTINUE;
 
-    inputdevices |= 4;
+    inputdevices |= DEV_JOYSTICK;
     d = "CONTROLLER";
     Bmemcpy(&guidDevs, &lpddi->guidInstance, sizeof(GUID));
 
@@ -955,12 +959,12 @@ static BOOL InitDirectInput(void)
     else if (result != DI_OK) initprintf("    Created DirectInput object with warning: %s\n",GetDInputError(result));
 
     initprintf("  - Enumerating attached game controllers\n");
-    inputdevices = 1|2;
+    inputdevices = DEV_KEYBOARD | DEV_MOUSE;
     result = IDirectInput7_EnumDevices(lpDI, DIDEVTYPE_JOYSTICK, InitDirectInput_enum, NULL, DIEDFL_ATTACHEDONLY);
     if (FAILED(result)) { HorribleDInputDeath("Failed enumerating attached game controllers", result); }
     else if (result != DI_OK) initprintf("    Enumerated game controllers with warning: %s\n",GetDInputError(result));
 
-    if (inputdevices == (1|2))
+    if (inputdevices == (DEV_KEYBOARD | DEV_MOUSE))
     {
         initprintf("  - No game controllers found\n");
         UninitDirectInput();
@@ -1024,6 +1028,7 @@ static BOOL InitDirectInput(void)
         joystick.numAxes    = (uint8_t)didc.dwAxes;
         joystick.numButtons = min<uint8_t>(32,didc.dwButtons);
         joystick.numHats    = (uint8_t)didc.dwPOVs;
+        joystick.validButtons = UINT32_MAX;
         initprintf("Controller has %d axes, %d buttons, and %d hat(s).\n",joystick.numAxes,joystick.numButtons,joystick.numHats);
 
         axisdefs = (struct _joydef *)Xcalloc(didc.dwAxes, sizeof(struct _joydef));
@@ -1803,6 +1808,9 @@ void videoShowFrame(int32_t w)
             fullscreen_tint_gl(palfadergb.r, palfadergb.g, palfadergb.b, palfadedelta);
 
         SwapBuffers(hDC);
+#ifdef USE_OPENGL
+        polymost_resetVertexPointers();
+#endif
         return;
     }
 #endif

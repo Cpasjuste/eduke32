@@ -148,30 +148,30 @@ int G_CheckActivatorMotion(int lotag)
 int CheckDoorTile(int tileNum)
 {
 #ifndef EDUKE32_STANDALONE
-    switch (DYNAMICTILEMAP(tileNum))
+    switch (tileGetMapping(tileNum))
     {
-        case DOORTILE1__STATIC:
-        case DOORTILE2__STATIC:
-        case DOORTILE3__STATIC:
-        case DOORTILE4__STATIC:
-        case DOORTILE5__STATIC:
-        case DOORTILE6__STATIC:
-        case DOORTILE7__STATIC:
-        case DOORTILE8__STATIC:
-        case DOORTILE9__STATIC:
-        case DOORTILE10__STATIC:
-        case DOORTILE11__STATIC:
-        case DOORTILE12__STATIC:
-        case DOORTILE14__STATIC:
-        case DOORTILE15__STATIC:
-        case DOORTILE16__STATIC:
-        case DOORTILE17__STATIC:
-        case DOORTILE18__STATIC:
-        case DOORTILE19__STATIC:
-        case DOORTILE20__STATIC:
-        case DOORTILE21__STATIC:
-        case DOORTILE22__STATIC:
-        case DOORTILE23__STATIC:
+        case DOORTILE1__:
+        case DOORTILE2__:
+        case DOORTILE3__:
+        case DOORTILE4__:
+        case DOORTILE5__:
+        case DOORTILE6__:
+        case DOORTILE7__:
+        case DOORTILE8__:
+        case DOORTILE9__:
+        case DOORTILE10__:
+        case DOORTILE11__:
+        case DOORTILE12__:
+        case DOORTILE14__:
+        case DOORTILE15__:
+        case DOORTILE16__:
+        case DOORTILE17__:
+        case DOORTILE18__:
+        case DOORTILE19__:
+        case DOORTILE20__:
+        case DOORTILE21__:
+        case DOORTILE22__:
+        case DOORTILE23__:
             return 1;
     }
 #else
@@ -455,25 +455,25 @@ void G_AnimateWalls(void)
     {
         int const wallNum = animwall[animwallNum].wallnum;
 
-        switch (DYNAMICTILEMAP(wall[wallNum].picnum))
+        switch (tileGetMapping(wall[wallNum].picnum))
         {
-        case SCREENBREAK1__STATIC:
-        case SCREENBREAK2__STATIC:
-        case SCREENBREAK3__STATIC:
-        case SCREENBREAK4__STATIC:
-        case SCREENBREAK5__STATIC:
+        case SCREENBREAK1__:
+        case SCREENBREAK2__:
+        case SCREENBREAK3__:
+        case SCREENBREAK4__:
+        case SCREENBREAK5__:
 
-        case SCREENBREAK9__STATIC:
-        case SCREENBREAK10__STATIC:
-        case SCREENBREAK11__STATIC:
-        case SCREENBREAK12__STATIC:
-        case SCREENBREAK13__STATIC:
-        case SCREENBREAK14__STATIC:
-        case SCREENBREAK15__STATIC:
-        case SCREENBREAK16__STATIC:
-        case SCREENBREAK17__STATIC:
-        case SCREENBREAK18__STATIC:
-        case SCREENBREAK19__STATIC:
+        case SCREENBREAK9__:
+        case SCREENBREAK10__:
+        case SCREENBREAK11__:
+        case SCREENBREAK12__:
+        case SCREENBREAK13__:
+        case SCREENBREAK14__:
+        case SCREENBREAK15__:
+        case SCREENBREAK16__:
+        case SCREENBREAK17__:
+        case SCREENBREAK18__:
+        case SCREENBREAK19__:
             if ((krand()&255) < 16)
             {
                 animwall[animwallNum].tag = wall[wallNum].picnum;
@@ -481,9 +481,9 @@ void G_AnimateWalls(void)
             }
             continue;
 
-        case SCREENBREAK6__STATIC:
-        case SCREENBREAK7__STATIC:
-        case SCREENBREAK8__STATIC:
+        case SCREENBREAK6__:
+        case SCREENBREAK7__:
+        case SCREENBREAK8__:
             if (animwall[animwallNum].tag >= 0 && wall[wallNum].extra != FEMPIC2 && wall[wallNum].extra != FEMPIC3)
                 wall[wallNum].picnum = animwall[animwallNum].tag;
             else
@@ -731,7 +731,11 @@ void G_OperateSectors(int sectNum, int spriteNum)
             if (i == -1)
             {
                 i = nextsectorneighborz(sectNum,pSector->floorz,1,-1);
-                if (i == -1) return;
+                if (i == -1)
+                {
+                    OSD_Printf("ST_16_PLATFORM_DOWN/ST_17_PLATFORM_UP: bad neighbor for sector %d!\n", sectNum);
+                    return;
+                }
                 j = sector[i].floorz;
                 SetAnimation(sectNum,&pSector->floorz,j,pSector->extra);
             }
@@ -758,7 +762,10 @@ void G_OperateSectors(int sectNum, int spriteNum)
                 i = nextsectorneighborz(sectNum, pSector->floorz, 1, 1);
 
             if (i == -1)
+            {
+                OSD_Printf("ST_18_ELEVATOR_DOWN/ST_19_ELEVATOR_UP: bad neighbor for sector %d!\n", sectNum);
                 return;
+            }
 
             j = sector[i].floorz;
 
@@ -792,7 +799,7 @@ void G_OperateSectors(int sectNum, int spriteNum)
             if (j == -1) j = nextsectorneighborz(sectNum,pSector->ceilingz,1,1);
             if (j == -1)
             {
-                OSD_Printf("WARNING: ST29: null sector!\n");
+                OSD_Printf("ST_29_TEETH_DOOR: bad neighbor for sector %d!\n", sectNum);
                 return;
             }
             j = sector[j].ceilingz;
@@ -803,7 +810,7 @@ void G_OperateSectors(int sectNum, int spriteNum)
             if (j == -1) j = nextsectorneighborz(sectNum,pSector->ceilingz,-1,-1);
             if (j == -1)
             {
-                OSD_Printf("WARNING: ST29: null sector!\n");
+                OSD_Printf("ST_29_TEETH_DOOR: bad neighbor for sector %d!\n", sectNum);
                 return;
             }
             j = sector[j].floorz;
@@ -851,14 +858,30 @@ REDODOOR:
         i = GetAnimationGoal(&pSector->floorz);
         if (i >= 0)
         {
-            if (g_animateGoal[sectNum] == pSector->ceilingz)
-                g_animateGoal[i] = sector[nextsectorneighborz(sectNum,pSector->ceilingz,1,1)].floorz;
+            if (g_animateGoal[i] == pSector->ceilingz)
+            {
+                j = nextsectorneighborz(sectNum, pSector->ceilingz, 1, 1);
+                if (j == -1)
+                {
+                    OSD_Printf("ST_21_FLOOR_DOOR: bad neighbor for sector %d!\n", sectNum);
+                    return;
+                }
+                g_animateGoal[i] = sector[j].floorz;
+            }
             else g_animateGoal[i] = pSector->ceilingz;
         }
         else
         {
             if (pSector->ceilingz == pSector->floorz)
-                j = sector[nextsectorneighborz(sectNum,pSector->ceilingz,1,1)].floorz;
+            {
+                i = nextsectorneighborz(sectNum, pSector->ceilingz, 1, 1);
+                if (i == -1)
+                {
+                    OSD_Printf("ST_21_FLOOR_DOOR: bad neighbor for sector %d!\n", sectNum);
+                    return;
+                }
+                j = sector[i].floorz;
+            }
             else j = pSector->ceilingz;
 
             pSector->lotag ^= 0x8000u;
@@ -888,8 +911,7 @@ REDODOOR:
             }
             else
             {
-                OSD_Printf("WARNING: ST_22_SPLITTING_DOOR: null sector: floor neighbor=%d, ceiling neighbor=%d!\n",
-                           floorNeighbor, ceilingNeighbor);
+                OSD_Printf("ST_22_SPLITTING_DOOR: bad neighbor for sector %d; floor neighbor=%d, ceiling neighbor=%d!\n", sectNum, floorNeighbor, ceilingNeighbor);
                 pSector->lotag ^= 0x8000u;
             }
         }
@@ -1029,7 +1051,7 @@ void G_OperateRespawns(int lotag)
                     sprite[j].z -= ZOFFSET5;
                 }
 #endif
-                // Just a way to killit (see G_MoveFX(): RESPAWN__STATIC)
+                // Just a way to killit (see G_MoveFX(): RESPAWN__)
                 pSprite->extra = 66-12;
             }
         }
@@ -1090,12 +1112,18 @@ void G_OperateActivators(int lotag, int playerNum)
                         {
                             switch (sprite[foundSprite].lotag)
                             {
-                                case SE_36_PROJ_SHOOTER:
+                                case SE_18_INCREMENTAL_SECTOR_RISE_FALL:
+                                case SE_21_DROP_FLOOR:
                                 case SE_31_FLOOR_RISE_FALL:
                                 case SE_32_CEILING_RISE_FALL:
-                                case SE_18_INCREMENTAL_SECTOR_RISE_FALL:
-                                    actor[foundSprite].t_data[0] = 1 - actor[foundSprite].t_data[0];
+                                case SE_36_PROJ_SHOOTER:
                                     A_CallSound(SECT(spriteNum), foundSprite);
+                                    fallthrough__;
+                                case SE_2_EARTHQUAKE:
+                                    actor[foundSprite].t_data[0] = 1 - actor[foundSprite].t_data[0];
+                                    break;
+                                case SE_3_RANDOM_LIGHTS_AFTER_SHOT_OUT:
+                                    actor[foundSprite].t_data[4] = 1 - actor[foundSprite].t_data[4];
                                     break;
                             }
                         }
@@ -1146,31 +1174,31 @@ void G_OperateForceFields(int spriteNum, int wallTag)
 
 // List of switches that function like dip (combination lock) switches.
 #define DIPSWITCH_LIKE_CASES                                                                                                \
-    DIPSWITCH__STATIC:                                                                                                      \
-    case TECHSWITCH__STATIC:                                                                                                \
-    case ALIENSWITCH__STATIC
+    DIPSWITCH__:                                                                                                      \
+    case TECHSWITCH__:                                                                                                \
+    case ALIENSWITCH__
 
 // List of access switches.
 #define ACCESSSWITCH_CASES                                                                                                  \
-    ACCESSSWITCH__STATIC:                                                                                                   \
-    case ACCESSSWITCH2__STATIC
+    ACCESSSWITCH__:                                                                                                   \
+    case ACCESSSWITCH2__
 
 // List of switches that don't fit the two preceding categories, and are not
 // the MULTISWITCH. 13 cases.
 #define REST_SWITCH_CASES                                                                                                   \
-    DIPSWITCH2__STATIC:                                                                                                     \
-    case DIPSWITCH3__STATIC:                                                                                                \
-    case FRANKENSTINESWITCH__STATIC:                                                                                        \
-    case HANDSWITCH__STATIC:                                                                                                \
-    case LIGHTSWITCH2__STATIC:                                                                                              \
-    case LIGHTSWITCH__STATIC:                                                                                               \
-    case LOCKSWITCH1__STATIC:                                                                                               \
-    case POWERSWITCH1__STATIC:                                                                                              \
-    case POWERSWITCH2__STATIC:                                                                                              \
-    case PULLSWITCH__STATIC:                                                                                                \
-    case SLOTDOOR__STATIC:                                                                                                  \
-    case SPACEDOORSWITCH__STATIC:                                                                                           \
-    case SPACELIGHTSWITCH__STATIC
+    DIPSWITCH2__:                                                                                                     \
+    case DIPSWITCH3__:                                                                                                \
+    case FRANKENSTINESWITCH__:                                                                                        \
+    case HANDSWITCH__:                                                                                                \
+    case LIGHTSWITCH2__:                                                                                              \
+    case LIGHTSWITCH__:                                                                                               \
+    case LOCKSWITCH1__:                                                                                               \
+    case POWERSWITCH1__:                                                                                              \
+    case POWERSWITCH2__:                                                                                              \
+    case PULLSWITCH__:                                                                                                \
+    case SLOTDOOR__:                                                                                                  \
+    case SPACEDOORSWITCH__:                                                                                           \
+    case SPACELIGHTSWITCH__
 
 // Returns:
 //  0: is not a dipswitch-like switch
@@ -1246,7 +1274,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
     int correctDips  = 1;
     int numDips      = 0;
 
-    switch (DYNAMICTILEMAP(basePicnum))
+    switch (tileGetMapping(basePicnum))
     {
     case DIPSWITCH_LIKE_CASES:
         break;
@@ -1281,7 +1309,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
             return 0;
         }
         fallthrough__;
-    case MULTISWITCH__STATIC:
+    case MULTISWITCH__:
     case REST_SWITCH_CASES:
         if (G_CheckActivatorMotion(lotag))
             return 0;
@@ -1308,7 +1336,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
                     sprite[spriteNum].picnum = MULTISWITCH;
             }
 
-            switch (DYNAMICTILEMAP(spritePic))
+            switch (tileGetMapping(spritePic))
             {
             case DIPSWITCH_LIKE_CASES:
                 if (switchType == SWITCH_SPRITE && wallOrSprite == spriteNum)
@@ -1327,7 +1355,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
                 if (spritePic <= 0)  // oob safety
                     break;
 
-                switch (DYNAMICTILEMAP(spritePic - 1))
+                switch (tileGetMapping(spritePic - 1))
                 {
                     case DIPSWITCH_LIKE_CASES:
                         if (switchType == SWITCH_SPRITE && wallOrSprite == spriteNum)
@@ -1357,7 +1385,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
                     wall[wallNum].picnum = MULTISWITCH;
             }
 
-            switch (DYNAMICTILEMAP(wall[wallNum].picnum))
+            switch (tileGetMapping(wall[wallNum].picnum))
             {
                 case DIPSWITCH_LIKE_CASES:
                     if (switchType == SWITCH_WALL && wallNum == wallOrSprite)
@@ -1376,7 +1404,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
                     if (wall[wallNum].picnum <= 0)  // oob safety
                         break;
 
-                    switch (DYNAMICTILEMAP(wall[wallNum].picnum - 1))
+                    switch (tileGetMapping(wall[wallNum].picnum - 1))
                     {
                         case DIPSWITCH_LIKE_CASES:
                             if (switchType == SWITCH_WALL && wallNum == wallOrSprite)
@@ -1403,7 +1431,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
 
     basePicnum = G_GetBaseSwitch(nSwitchPicnum);
 
-    switch (DYNAMICTILEMAP(basePicnum))
+    switch (tileGetMapping(basePicnum))
     {
         default:
             if (CheckDoorTile(nSwitchPicnum) == 0)
@@ -1422,7 +1450,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
             }
             fallthrough__;
         case ACCESSSWITCH_CASES:
-        case MULTISWITCH__STATIC:
+        case MULTISWITCH__:
         case REST_SWITCH_CASES:
         {
             if (nSwitchPicnum >= MULTISWITCH && nSwitchPicnum <= MULTISWITCH + 3)
@@ -1442,7 +1470,7 @@ int P_ActivateSwitch(int playerNum, int wallOrSprite, int switchType)
                             break;
 
                         case SE_24_CONVEYOR:
-                        case SE_34:
+                        case SE_34_CONVEYOR2:
                         case SE_25_PISTON:
                             actor[spriteNum].t_data[4] = !actor[spriteNum].t_data[4];
                             P_DoQuote(actor[spriteNum].t_data[4] ? QUOTE_DEACTIVATED : QUOTE_ACTIVATED, g_player[playerNum].ps);
@@ -1535,16 +1563,16 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
 
     if (pWall->overpicnum == MIRROR && pWall->pal != 4)
     {
-        switch (DYNAMICTILEMAP(weaponNum))
+        switch (tileGetMapping(weaponNum))
         {
-            case RADIUSEXPLOSION__STATIC:
-            case SEENINE__STATIC:
+            case RADIUSEXPLOSION__:
+            case SEENINE__:
 #ifndef EDUKE32_STANDALONE
-            case HEAVYHBOMB__STATIC:
-            case RPG__STATIC:
-            case HYDRENT__STATIC:
-            case OOZFILTER__STATIC:
-            case EXPLODINGBARREL__STATIC:
+            case HEAVYHBOMB__:
+            case RPG__:
+            case HYDRENT__:
+            case OOZFILTER__:
+            case EXPLODINGBARREL__:
 #endif
                 if (pWall->nextwall == -1 || wall[pWall->nextwall].pal != 4)
                 {
@@ -1565,9 +1593,9 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
     {
         int const switchPic = G_GetForcefieldPicnum(wallNum);
 
-        switch (DYNAMICTILEMAP(switchPic))
+        switch (tileGetMapping(switchPic))
         {
-            case FANSPRITE__STATIC:
+            case FANSPRITE__:
                 pWall->overpicnum = FANSPRITEBROKE;
                 pWall->cstat &= 65535 - 65;
                 if (pWall->nextwall >= 0)
@@ -1580,10 +1608,10 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
                 return;
 
 #ifndef EDUKE32_STANDALONE
-            case W_FORCEFIELD__STATIC:
+            case W_FORCEFIELD__:
                 pWall->extra = 1;  // tell the forces to animate
                 fallthrough__;
-            case BIGFORCE__STATIC:
+            case BIGFORCE__:
             {
                 updatesector(vPos.x, vPos.y, &sectNum);
                 if (sectNum < 0)
@@ -1610,7 +1638,7 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
             }
                 return;
 
-            case GLASS__STATIC:
+            case GLASS__:
                 updatesector(vPos.x, vPos.y, &sectNum);
                 if (sectNum < 0)
                     return;
@@ -1631,7 +1659,7 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
                 }
                 return;
 
-            case STAINGLASS1__STATIC:
+            case STAINGLASS1__:
                 updatesector(vPos.x, vPos.y, &sectNum);
                 if (sectNum < 0)
                     return;
@@ -1646,40 +1674,40 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
         }
     }
 
-    switch (DYNAMICTILEMAP(pWall->picnum))
+    switch (tileGetMapping(pWall->picnum))
     {
-        case COLAMACHINE__STATIC:
-        case VENDMACHINE__STATIC:
+        case COLAMACHINE__:
+        case VENDMACHINE__:
             G_BreakWall(pWall->picnum + 2, spriteNum, wallNum);
             A_PlaySound(VENT_BUST, spriteNum);
             return;
 
-        case OJ__STATIC:
-        case FEMPIC2__STATIC:
-        case FEMPIC3__STATIC:
+        case OJ__:
+        case FEMPIC2__:
+        case FEMPIC3__:
 
-        case SCREENBREAK6__STATIC:
-        case SCREENBREAK7__STATIC:
-        case SCREENBREAK8__STATIC:
+        case SCREENBREAK6__:
+        case SCREENBREAK7__:
+        case SCREENBREAK8__:
 
-        case SCREENBREAK1__STATIC:
-        case SCREENBREAK2__STATIC:
-        case SCREENBREAK3__STATIC:
-        case SCREENBREAK4__STATIC:
-        case SCREENBREAK5__STATIC:
+        case SCREENBREAK1__:
+        case SCREENBREAK2__:
+        case SCREENBREAK3__:
+        case SCREENBREAK4__:
+        case SCREENBREAK5__:
 
-        case SCREENBREAK9__STATIC:
-        case SCREENBREAK10__STATIC:
-        case SCREENBREAK11__STATIC:
-        case SCREENBREAK12__STATIC:
-        case SCREENBREAK13__STATIC:
-        case SCREENBREAK14__STATIC:
-        case SCREENBREAK15__STATIC:
-        case SCREENBREAK16__STATIC:
-        case SCREENBREAK17__STATIC:
-        case SCREENBREAK18__STATIC:
-        case SCREENBREAK19__STATIC:
-        case BORNTOBEWILDSCREEN__STATIC:
+        case SCREENBREAK9__:
+        case SCREENBREAK10__:
+        case SCREENBREAK11__:
+        case SCREENBREAK12__:
+        case SCREENBREAK13__:
+        case SCREENBREAK14__:
+        case SCREENBREAK15__:
+        case SCREENBREAK16__:
+        case SCREENBREAK17__:
+        case SCREENBREAK18__:
+        case SCREENBREAK19__:
+        case BORNTOBEWILDSCREEN__:
 #ifndef EDUKE32_STANDALONE
             A_SpawnWallGlass(spriteNum, wallNum, 30);
             A_PlaySound(GLASS_HEAVYBREAK, spriteNum);
@@ -1687,62 +1715,62 @@ void A_DamageWall_Internal(int spriteNum, int wallNum, const vec3_t &vPos, int w
             pWall->picnum = W_SCREENBREAK + (krand() % 3);
             return;
 
-        case W_TECHWALL5__STATIC:
-        case W_TECHWALL6__STATIC:
-        case W_TECHWALL7__STATIC:
-        case W_TECHWALL8__STATIC:
-        case W_TECHWALL9__STATIC:
+        case W_TECHWALL5__:
+        case W_TECHWALL6__:
+        case W_TECHWALL7__:
+        case W_TECHWALL8__:
+        case W_TECHWALL9__:
             G_BreakWall(pWall->picnum + 1, spriteNum, wallNum);
             return;
 
-        case W_MILKSHELF__STATIC:
+        case W_MILKSHELF__:
             G_BreakWall(W_MILKSHELFBROKE, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL10__STATIC:
+        case W_TECHWALL10__:
             G_BreakWall(W_HITTECHWALL10, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL1__STATIC:
-        case W_TECHWALL11__STATIC:
-        case W_TECHWALL12__STATIC:
-        case W_TECHWALL13__STATIC:
-        case W_TECHWALL14__STATIC:
+        case W_TECHWALL1__:
+        case W_TECHWALL11__:
+        case W_TECHWALL12__:
+        case W_TECHWALL13__:
+        case W_TECHWALL14__:
             G_BreakWall(W_HITTECHWALL1, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL15__STATIC:
+        case W_TECHWALL15__:
             G_BreakWall(W_HITTECHWALL15, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL16__STATIC:
+        case W_TECHWALL16__:
             G_BreakWall(W_HITTECHWALL16, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL2__STATIC:
+        case W_TECHWALL2__:
             G_BreakWall(W_HITTECHWALL2, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL3__STATIC:
+        case W_TECHWALL3__:
             G_BreakWall(W_HITTECHWALL3, spriteNum, wallNum);
             return;
 
-        case W_TECHWALL4__STATIC:
+        case W_TECHWALL4__:
             G_BreakWall(W_HITTECHWALL4, spriteNum, wallNum);
             return;
 
-        case ATM__STATIC:
+        case ATM__:
             pWall->picnum = ATMBROKE;
             A_SpawnMultiple(spriteNum, MONEY, 1 + (krand() & 7));
             A_PlaySound(GLASS_HEAVYBREAK, spriteNum);
             break;
 
-        case WALLLIGHT1__STATIC:
-        case WALLLIGHT2__STATIC:
-        case WALLLIGHT3__STATIC:
-        case WALLLIGHT4__STATIC:
-        case TECHLIGHT2__STATIC:
-        case TECHLIGHT4__STATIC:
+        case WALLLIGHT1__:
+        case WALLLIGHT2__:
+        case WALLLIGHT3__:
+        case WALLLIGHT4__:
+        case TECHLIGHT2__:
+        case TECHLIGHT4__:
         {
 #ifndef EDUKE32_STANDALONE
             A_PlaySound(rnd(128) ? GLASS_HEAVYBREAK : GLASS_BREAKING, spriteNum);
@@ -1858,14 +1886,14 @@ void Sect_DamageCeiling_Internal(int const spriteNum, int const sectNum)
     }
 
 #ifndef EDUKE32_STANDALONE
-    switch (DYNAMICTILEMAP(*pPicnum))
+    switch (tileGetMapping(*pPicnum))
     {
-        case WALLLIGHT1__STATIC: *pPicnum = WALLLIGHTBUST1; goto GLASSBREAK_CODE;
-        case WALLLIGHT2__STATIC: *pPicnum = WALLLIGHTBUST2; goto GLASSBREAK_CODE;
-        case WALLLIGHT3__STATIC: *pPicnum = WALLLIGHTBUST3; goto GLASSBREAK_CODE;
-        case WALLLIGHT4__STATIC: *pPicnum = WALLLIGHTBUST4; goto GLASSBREAK_CODE;
-        case TECHLIGHT2__STATIC: *pPicnum = TECHLIGHTBUST2; goto GLASSBREAK_CODE;
-        case TECHLIGHT4__STATIC: *pPicnum = TECHLIGHTBUST4;
+        case WALLLIGHT1__: *pPicnum = WALLLIGHTBUST1; goto GLASSBREAK_CODE;
+        case WALLLIGHT2__: *pPicnum = WALLLIGHTBUST2; goto GLASSBREAK_CODE;
+        case WALLLIGHT3__: *pPicnum = WALLLIGHTBUST3; goto GLASSBREAK_CODE;
+        case WALLLIGHT4__: *pPicnum = WALLLIGHTBUST4; goto GLASSBREAK_CODE;
+        case TECHLIGHT2__: *pPicnum = TECHLIGHTBUST2; goto GLASSBREAK_CODE;
+        case TECHLIGHT4__: *pPicnum = TECHLIGHTBUST4;
 #else
     if (0)
     {
@@ -1929,15 +1957,15 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         if (SpriteProjectile[dmgSrc].workslike & PROJECTILE_RPG)
             radiusDamage = 1;
 
-    switch (DYNAMICTILEMAP(PN(spriteNum)))
+    switch (tileGetMapping(PN(spriteNum)))
     {
-    case GRATE1__STATIC:
+    case GRATE1__:
         PN(spriteNum) = BGRATE1;
         CS(spriteNum) &= (65535-256-1);
         A_PlaySound(VENT_BUST, spriteNum);
         return;
 
-    case FANSPRITE__STATIC:
+    case FANSPRITE__:
         PN(spriteNum) = FANSPRITEBROKE;
         CS(spriteNum) &= (65535-257);
 
@@ -1953,17 +1981,17 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         }
         return;
 
-    case OCEANSPRITE1__STATIC:
-    case OCEANSPRITE2__STATIC:
-    case OCEANSPRITE3__STATIC:
-    case OCEANSPRITE4__STATIC:
-    case OCEANSPRITE5__STATIC:
+    case OCEANSPRITE1__:
+    case OCEANSPRITE2__:
+    case OCEANSPRITE3__:
+    case OCEANSPRITE4__:
+    case OCEANSPRITE5__:
         A_Spawn(spriteNum,SMALLSMOKE);
         A_DeleteSprite(spriteNum);
         return;
 
-    case QUEBALL__STATIC:
-    case STRIPEBALL__STATIC:
+    case QUEBALL__:
+    case STRIPEBALL__:
         if (sprite[dmgSrc].picnum == QUEBALL || sprite[dmgSrc].picnum == STRIPEBALL)
         {
             sprite[dmgSrc].xvel = (sprite[spriteNum].xvel>>1)+(sprite[spriteNum].xvel>>2);
@@ -1987,24 +2015,24 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         }
         return;
 
-    case TREE1__STATIC:
-    case TREE2__STATIC:
-    case TIRE__STATIC:
-    case CONE__STATIC:
-    case BOX__STATIC:
+    case TREE1__:
+    case TREE2__:
+    case TIRE__:
+    case CONE__:
+    case BOX__:
     {
-        switch (DYNAMICTILEMAP(sprite[dmgSrc].picnum))
+        switch (tileGetMapping(sprite[dmgSrc].picnum))
         {
-        case FLAMETHROWERFLAME__STATIC:
-        case FIREBALL__STATIC:
+        case FLAMETHROWERFLAME__:
+        case FIREBALL__:
             if (!WORLDTOUR)
                 break;
             fallthrough__;
-        case RADIUSEXPLOSION__STATIC:
-        case RPG__STATIC:
-        case FIRELASER__STATIC:
-        case HYDRENT__STATIC:
-        case HEAVYHBOMB__STATIC:
+        case RADIUSEXPLOSION__:
+        case RPG__:
+        case FIRELASER__:
+        case HYDRENT__:
+        case HEAVYHBOMB__:
             radiusDamage = 1;
             break;
         }
@@ -2019,15 +2047,15 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         return;
     }
 
-    case CACTUS__STATIC:
+    case CACTUS__:
     {
-        switch (DYNAMICTILEMAP(sprite[dmgSrc].picnum))
+        switch (tileGetMapping(sprite[dmgSrc].picnum))
         {
-        case RADIUSEXPLOSION__STATIC:
-        case RPG__STATIC:
-        case FIRELASER__STATIC:
-        case HYDRENT__STATIC:
-        case HEAVYHBOMB__STATIC:
+        case RADIUSEXPLOSION__:
+        case RPG__:
+        case FIRELASER__:
+        case HYDRENT__:
+        case HEAVYHBOMB__:
             radiusDamage = 1;
             break;
         }
@@ -2049,25 +2077,25 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         return;
     }
 
-    case HANGLIGHT__STATIC:
-    case GENERICPOLE2__STATIC:
+    case HANGLIGHT__:
+    case GENERICPOLE2__:
         for (bssize_t k=6; k>0; k--)
             A_InsertSprite(SECT(spriteNum),SX(spriteNum),SY(spriteNum),SZ(spriteNum)-ZOFFSET3,SCRAP1+(krand()&15),-8,48,48,krand()&2047,(krand()&63)+64,-(krand()&4095)-(sprite[spriteNum].zvel>>2),spriteNum,5);
         A_PlaySound(GLASS_HEAVYBREAK,spriteNum);
         A_DeleteSprite(spriteNum);
         return;
 
-    case WATERFOUNTAIN__STATIC:
+    case WATERFOUNTAIN__:
         //    case WATERFOUNTAIN+1:
         //    case WATERFOUNTAIN+2:
         PN(spriteNum) = WATERFOUNTAINBROKE;
         A_Spawn(spriteNum,TOILETWATER);
         return;
 
-    case SATELITE__STATIC:
-    case FUELPOD__STATIC:
-    case SOLARPANNEL__STATIC:
-    case ANTENNA__STATIC:
+    case SATELITE__:
+    case FUELPOD__:
+    case SOLARPANNEL__:
+    case ANTENNA__:
         if (sprite[dmgSrc].extra != G_DefaultActorHealthForTile(SHOTSPARK1))
         {
             for (bssize_t j=15; j>0; j--)
@@ -2078,34 +2106,34 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         }
         return;
 
-    case BOTTLE1__STATIC:
-    case BOTTLE2__STATIC:
-    case BOTTLE3__STATIC:
-    case BOTTLE4__STATIC:
-    case BOTTLE5__STATIC:
-    case BOTTLE6__STATIC:
-    case BOTTLE8__STATIC:
-    case BOTTLE10__STATIC:
-    case BOTTLE11__STATIC:
-    case BOTTLE12__STATIC:
-    case BOTTLE13__STATIC:
-    case BOTTLE14__STATIC:
-    case BOTTLE15__STATIC:
-    case BOTTLE16__STATIC:
-    case BOTTLE17__STATIC:
-    case BOTTLE18__STATIC:
-    case BOTTLE19__STATIC:
-    case WATERFOUNTAINBROKE__STATIC:
-    case DOMELITE__STATIC:
-    case SUSHIPLATE1__STATIC:
-    case SUSHIPLATE2__STATIC:
-    case SUSHIPLATE3__STATIC:
-    case SUSHIPLATE4__STATIC:
-    case SUSHIPLATE5__STATIC:
-    case WAITTOBESEATED__STATIC:
-    case VASE__STATIC:
-    case STATUEFLASH__STATIC:
-    case STATUE__STATIC:
+    case BOTTLE1__:
+    case BOTTLE2__:
+    case BOTTLE3__:
+    case BOTTLE4__:
+    case BOTTLE5__:
+    case BOTTLE6__:
+    case BOTTLE8__:
+    case BOTTLE10__:
+    case BOTTLE11__:
+    case BOTTLE12__:
+    case BOTTLE13__:
+    case BOTTLE14__:
+    case BOTTLE15__:
+    case BOTTLE16__:
+    case BOTTLE17__:
+    case BOTTLE18__:
+    case BOTTLE19__:
+    case WATERFOUNTAINBROKE__:
+    case DOMELITE__:
+    case SUSHIPLATE1__:
+    case SUSHIPLATE2__:
+    case SUSHIPLATE3__:
+    case SUSHIPLATE4__:
+    case SUSHIPLATE5__:
+    case WAITTOBESEATED__:
+    case VASE__:
+    case STATUEFLASH__:
+    case STATUE__:
         if (PN(spriteNum) == BOTTLE10)
             A_SpawnMultiple(spriteNum, MONEY, 4+(krand()&3));
         else if (PN(spriteNum) == STATUE || PN(spriteNum) == STATUEFLASH)
@@ -2122,13 +2150,13 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_DeleteSprite(spriteNum);
         return;
 
-    case FETUS__STATIC:
+    case FETUS__:
         PN(spriteNum) = FETUSBROKE;
         A_PlaySound(GLASS_BREAKING,spriteNum);
         A_SpawnWallGlass(spriteNum,-1,10);
         return;
 
-    case FETUSBROKE__STATIC:
+    case FETUSBROKE__:
         for (bssize_t j=48; j>0; j--)
         {
             A_Shoot(spriteNum,BLOODSPLAT1);
@@ -2137,14 +2165,14 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_PlaySound(GLASS_HEAVYBREAK,spriteNum);
         A_PlaySound(SQUISHED,spriteNum);
         fallthrough__;
-    case BOTTLE7__STATIC:
+    case BOTTLE7__:
         A_PlaySound(GLASS_BREAKING,spriteNum);
         A_SpawnWallGlass(spriteNum,-1,10);
         A_DeleteSprite(spriteNum);
         return;
 
-    case E32_TILE5736__STATIC:
-    case E32_TILE5737__STATIC:
+    case E32_TILE5736__:
+    case E32_TILE5737__:
         if (!WORLDTOUR)
             break;
         A_PlaySound(GLASS_BREAKING,spriteNum);
@@ -2152,13 +2180,13 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_DeleteSprite(spriteNum);
         return;
 
-    case HYDROPLANT__STATIC:
+    case HYDROPLANT__:
         PN(spriteNum) = BROKEHYDROPLANT;
         A_PlaySound(GLASS_BREAKING,spriteNum);
         A_SpawnWallGlass(spriteNum,-1,10);
         return;
 
-    case FORCESPHERE__STATIC:
+    case FORCESPHERE__:
         sprite[spriteNum].xrepeat = 0;
         actor[OW(spriteNum)].t_data[0] = 32;
         actor[OW(spriteNum)].t_data[1] = !actor[OW(spriteNum)].t_data[1];
@@ -2166,13 +2194,13 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_Spawn(spriteNum,EXPLOSION2);
         return;
 
-    case BROKEHYDROPLANT__STATIC:
+    case BROKEHYDROPLANT__:
         A_PlaySound(GLASS_BREAKING,spriteNum);
         A_SpawnWallGlass(spriteNum,-1,5);
         A_DeleteSprite(spriteNum);
         return;
 
-    case TOILET__STATIC:
+    case TOILET__:
         PN(spriteNum) = TOILETBROKE;
         CS(spriteNum) |= (krand()&1)<<2;
         CS(spriteNum) &= ~257;
@@ -2180,7 +2208,7 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_PlaySound(GLASS_BREAKING,spriteNum);
         return;
 
-    case STALL__STATIC:
+    case STALL__:
         PN(spriteNum) = STALLBROKE;
         CS(spriteNum) |= (krand()&1)<<2;
         CS(spriteNum) &= ~257;
@@ -2188,7 +2216,7 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_PlaySound(GLASS_HEAVYBREAK,spriteNum);
         return;
 
-    case HYDRENT__STATIC:
+    case HYDRENT__:
         PN(spriteNum) = BROKEFIREHYDRENT;
         A_Spawn(spriteNum,TOILETWATER);
 
@@ -2200,50 +2228,50 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_PlaySound(GLASS_HEAVYBREAK,spriteNum);
         return;
 
-    case CIRCLEPANNEL__STATIC:
+    case CIRCLEPANNEL__:
         PN(spriteNum) = CIRCLEPANNELBROKE;
         CS(spriteNum) &= (65535-256-1);
         A_PlaySound(VENT_BUST,spriteNum);
         return;
 
-    case PANNEL1__STATIC:
-    case PANNEL2__STATIC:
+    case PANNEL1__:
+    case PANNEL2__:
         PN(spriteNum) = BPANNEL1;
         CS(spriteNum) &= (65535-256-1);
         A_PlaySound(VENT_BUST,spriteNum);
         return;
 
-    case PANNEL3__STATIC:
+    case PANNEL3__:
         PN(spriteNum) = BPANNEL3;
         CS(spriteNum) &= (65535-256-1);
         A_PlaySound(VENT_BUST,spriteNum);
         return;
 
-    case PIPE1__STATIC:
-    case PIPE2__STATIC:
-    case PIPE3__STATIC:
-    case PIPE4__STATIC:
-    case PIPE5__STATIC:
-    case PIPE6__STATIC:
+    case PIPE1__:
+    case PIPE2__:
+    case PIPE3__:
+    case PIPE4__:
+    case PIPE5__:
+    case PIPE6__:
     {
-        switch (DYNAMICTILEMAP(PN(spriteNum)))
+        switch (tileGetMapping(PN(spriteNum)))
         {
-        case PIPE1__STATIC:
+        case PIPE1__:
             PN(spriteNum)=PIPE1B;
             break;
-        case PIPE2__STATIC:
+        case PIPE2__:
             PN(spriteNum)=PIPE2B;
             break;
-        case PIPE3__STATIC:
+        case PIPE3__:
             PN(spriteNum)=PIPE3B;
             break;
-        case PIPE4__STATIC:
+        case PIPE4__:
             PN(spriteNum)=PIPE4B;
             break;
-        case PIPE5__STATIC:
+        case PIPE5__:
             PN(spriteNum)=PIPE5B;
             break;
-        case PIPE6__STATIC:
+        case PIPE6__:
             PN(spriteNum)=PIPE6B;
             break;
         }
@@ -2253,18 +2281,18 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         return;
     }
 
-    case MONK__STATIC:
-    case LUKE__STATIC:
-    case INDY__STATIC:
-    case JURYGUY__STATIC:
+    case MONK__:
+    case LUKE__:
+    case INDY__:
+    case JURYGUY__:
         A_PlaySound(SLT(spriteNum),spriteNum);
         A_Spawn(spriteNum,SHT(spriteNum));
         fallthrough__;
-    case E32_TILE5846__STATIC:
+    case E32_TILE5846__:
         if (!WORLDTOUR && PN(spriteNum) == E32_TILE5846)
             break;
         fallthrough__;
-    case SPACEMARINE__STATIC:
+    case SPACEMARINE__:
         sprite[spriteNum].extra -= sprite[dmgSrc].extra;
         if (sprite[spriteNum].extra > 0)
             return;
@@ -2294,22 +2322,22 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_DeleteSprite(spriteNum);
         return;
 
-    case CHAIR1__STATIC:
-    case CHAIR2__STATIC:
+    case CHAIR1__:
+    case CHAIR2__:
         PN(spriteNum) = BROKENCHAIR;
         CS(spriteNum) = 0;
         return;
 
-    case CHAIR3__STATIC:
-    case MOVIECAMERA__STATIC:
-    case SCALE__STATIC:
-    case VACUUM__STATIC:
-    case CAMERALIGHT__STATIC:
-    case IVUNIT__STATIC:
-    case POT1__STATIC:
-    case POT2__STATIC:
-    case POT3__STATIC:
-    case TRIPODCAMERA__STATIC:
+    case CHAIR3__:
+    case MOVIECAMERA__:
+    case SCALE__:
+    case VACUUM__:
+    case CAMERALIGHT__:
+    case IVUNIT__:
+    case POT1__:
+    case POT2__:
+    case POT3__:
+    case TRIPODCAMERA__:
         A_PlaySound(GLASS_HEAVYBREAK,spriteNum);
         for (bssize_t j=16; j>0; j--)
         {
@@ -2319,7 +2347,7 @@ void A_DamageObject_Duke3D(int spriteNum, int const dmgSrc)
         A_DeleteSprite(spriteNum);
         return;
 
-    case PLAYERONWATER__STATIC:
+    case PLAYERONWATER__:
         spriteNum = OW(spriteNum);
         fallthrough__;
     default:
@@ -2439,19 +2467,19 @@ void A_DamageObject_Generic(int spriteNum, int const dmgSrc)
 
     spriteNum &= (MAXSPRITES-1);
 
-    switch (DYNAMICTILEMAP(PN(spriteNum)))
+    switch (tileGetMapping(PN(spriteNum)))
     {
-    case GRATE1__STATIC:
+    case GRATE1__:
         PN(spriteNum) = BGRATE1;
         CS(spriteNum) &= (65535-256-1);
         break;
 
-    case FANSPRITE__STATIC:
+    case FANSPRITE__:
         PN(spriteNum) = FANSPRITEBROKE;
         CS(spriteNum) &= (65535-257);
         break;
 
-    case PLAYERONWATER__STATIC:
+    case PLAYERONWATER__:
         spriteNum = OW(spriteNum);
         fallthrough__;
     default:
@@ -2566,7 +2594,8 @@ void P_HandleSharedKeys(int playerNum)
 
     if (pPlayer->cheat_phase == 1) return;
 
-    uint32_t playerBits = g_player[playerNum].input->bits, weaponNum;
+    uint32_t playerBits = g_player[playerNum].input.bits;
+    uint32_t const extBits = g_player[playerNum].input.extbits;
 
     // 1<<0  =  jump
     // 1<<1  =  crouch
@@ -2601,7 +2630,10 @@ void P_HandleSharedKeys(int playerNum)
     int const aimMode = pPlayer->aim_mode;
 
     pPlayer->aim_mode = (playerBits>>SK_AIMMODE)&1;
-    if (pPlayer->aim_mode < aimMode)
+    pPlayer->aim_mode |= ((extBits>>EK_GAMEPAD_CENTERING)&1)<<1;
+    pPlayer->aim_mode |= ((extBits>>EK_GAMEPAD_AIM_ASSIST)&1)<<2;
+
+    if (pPlayer->aim_mode < (aimMode & 3))
         pPlayer->return_to_center = 9;
 
     if (TEST_SYNC_KEY(playerBits, SK_QUICK_KICK) && pPlayer->quick_kick == 0)
@@ -2615,7 +2647,7 @@ void P_HandleSharedKeys(int playerNum)
             }
         }
 
-    weaponNum = playerBits & ((15u<<SK_WEAPON_BITS)|BIT(SK_STEROIDS)|BIT(SK_NIGHTVISION)|BIT(SK_MEDKIT)|BIT(SK_QUICK_KICK)| \
+    uint32_t weaponNum = playerBits & ((15u<<SK_WEAPON_BITS)|BIT(SK_STEROIDS)|BIT(SK_NIGHTVISION)|BIT(SK_MEDKIT)|BIT(SK_QUICK_KICK)| \
                    BIT(SK_HOLSTER)|BIT(SK_INV_LEFT)|BIT(SK_PAUSE)|BIT(SK_HOLODUKE)|BIT(SK_JETPACK)|BIT(SK_INV_RIGHT)| \
                    BIT(SK_TURNAROUND)|BIT(SK_OPEN)|BIT(SK_INVENTORY)|BIT(SK_ESCAPE));
     playerBits = weaponNum & ~pPlayer->interface_toggle;
@@ -2632,7 +2664,8 @@ void P_HandleSharedKeys(int playerNum)
             else ud.pause_on = 1+SHIFTS_IS_PRESSED;
             if (ud.pause_on)
             {
-                S_PauseMusic(true);
+                if (ud.recstat != 2) // edge case: pause during demo recording
+                    S_PauseMusic(true);
                 S_PauseSounds(true);
             }
             else
@@ -2765,7 +2798,7 @@ CHECKINV1:
             }
         }
 
-        weaponNum = ((playerBits&(15<<SK_WEAPON_BITS))>>SK_WEAPON_BITS) - 1;
+        weaponNum = ((playerBits&SK_WEAPON_MASK)>>SK_WEAPON_BITS) - 1;
 
         switch ((int32_t)weaponNum)
         {
@@ -2795,7 +2828,7 @@ CHECKINV1:
 
         if (pPlayer->reloading == 1)
             weaponNum = -1;
-        else if ((uint32_t)weaponNum < MAX_WEAPONS && pPlayer->kickback_pic == 1 && pPlayer->weapon_pos == 1)
+        else if ((uint32_t)weaponNum < 12 && pPlayer->kickback_pic == 1 && pPlayer->weapon_pos == 1)
         {
             pPlayer->wantweaponfire = weaponNum;
             pPlayer->kickback_pic = 0;
@@ -2934,8 +2967,7 @@ CHECKINV1:
 
                 weaponNum = VM_OnEventWithReturn(EVENT_SELECTWEAPON,pPlayer->i,playerNum, weaponNum);
 
-                // XXX: any signifcance to "<= MAX_WEAPONS" instead of "<"?
-                if ((int32_t)weaponNum != -1 && weaponNum <= MAX_WEAPONS)
+                if ((int32_t)weaponNum != -1 && weaponNum < MAX_WEAPONS)
                 {
                     if (P_CheckDetonatorSpecialCase(pPlayer, weaponNum))
                     {
@@ -3194,7 +3226,7 @@ static int P_FindWall(DukePlayer_t *pPlayer, int *hitWall)
 // returns 1 if sprite i should not be considered by neartag
 static int32_t our_neartag_blacklist(int32_t spriteNum)
 {
-    return sprite[spriteNum].picnum >= SECTOREFFECTOR__STATIC && sprite[spriteNum].picnum <= GPSPEED__STATIC;
+    return sprite[spriteNum].picnum >= SECTOREFFECTOR__ && sprite[spriteNum].picnum <= GPSPEED__;
 }
 
 static void G_ClearCameras(DukePlayer_t *p)
@@ -3247,27 +3279,27 @@ void P_CheckSectors(int playerNum)
     if (pPlayer->gm &MODE_TYPE || sprite[pPlayer->i].extra <= 0)
         return;
 
-    if (TEST_SYNC_KEY(g_player[playerNum].input->bits, SK_OPEN))
+    if (TEST_SYNC_KEY(g_player[playerNum].input.bits, SK_OPEN))
     {
         if (VM_OnEvent(EVENT_USE, pPlayer->i, playerNum) != 0)
-            g_player[playerNum].input->bits &= ~BIT(SK_OPEN);
+            g_player[playerNum].input.bits &= ~BIT(SK_OPEN);
     }
 
 #ifndef EDUKE32_STANDALONE
-    if (!FURY && ud.cashman && TEST_SYNC_KEY(g_player[playerNum].input->bits, SK_OPEN))
+    if (!FURY && ud.cashman && TEST_SYNC_KEY(g_player[playerNum].input.bits, SK_OPEN))
         A_SpawnMultiple(pPlayer->i, MONEY, 2);
 #endif
 
     if (pPlayer->newowner >= 0)
     {
-        if (klabs(g_player[playerNum].input->svel) > 768 || klabs(g_player[playerNum].input->fvel) > 768)
+        if (klabs(g_player[playerNum].input.svel) > 768 || klabs(g_player[playerNum].input.fvel) > 768)
         {
             G_ClearCameras(pPlayer);
             return;
         }
     }
 
-    if (!TEST_SYNC_KEY(g_player[playerNum].input->bits, SK_OPEN) && !TEST_SYNC_KEY(g_player[playerNum].input->bits, SK_ESCAPE))
+    if (!TEST_SYNC_KEY(g_player[playerNum].input.bits, SK_OPEN) && !TEST_SYNC_KEY(g_player[playerNum].input.bits, SK_ESCAPE))
         pPlayer->toggle_key_flag = 0;
     else if (!pPlayer->toggle_key_flag)
     {
@@ -3276,7 +3308,7 @@ void P_CheckSectors(int playerNum)
         int16_t nearSector, nearWall, nearSprite;
         int32_t nearDist;
 
-        if (TEST_SYNC_KEY(g_player[playerNum].input->bits, SK_ESCAPE))
+        if (TEST_SYNC_KEY(g_player[playerNum].input.bits, SK_ESCAPE))
         {
             if (pPlayer->newowner >= 0)
                 G_ClearCameras(pPlayer);
@@ -3321,22 +3353,22 @@ void P_CheckSectors(int playerNum)
                     &nearWall, &nearSprite, &nearDist, 1280, 3, our_neartag_blacklist);
                 if (nearSprite >= 0)
                 {
-                    switch (DYNAMICTILEMAP(sprite[nearSprite].picnum))
+                    switch (tileGetMapping(sprite[nearSprite].picnum))
                     {
-                        case FEM1__STATIC:
-                        case FEM2__STATIC:
-                        case FEM3__STATIC:
-                        case FEM4__STATIC:
-                        case FEM5__STATIC:
-                        case FEM6__STATIC:
-                        case FEM7__STATIC:
-                        case FEM8__STATIC:
-                        case FEM9__STATIC:
-                        case FEM10__STATIC:
-                        case PODFEM1__STATIC:
-                        case NAKED1__STATIC:
-                        case STATUE__STATIC:
-                        case TOUGHGAL__STATIC: return;
+                        case FEM1__:
+                        case FEM2__:
+                        case FEM3__:
+                        case FEM4__:
+                        case FEM5__:
+                        case FEM6__:
+                        case FEM7__:
+                        case FEM8__:
+                        case FEM9__:
+                        case FEM10__:
+                        case PODFEM1__:
+                        case NAKED1__:
+                        case STATUE__:
+                        case TOUGHGAL__: return;
                     }
                 }
 
@@ -3369,11 +3401,11 @@ void P_CheckSectors(int playerNum)
             if (P_ActivateSwitch(playerNum, nearSprite, 1))
                 return;
 
-            switch (DYNAMICTILEMAP(sprite[nearSprite].picnum))
+            switch (tileGetMapping(sprite[nearSprite].picnum))
             {
 #ifndef EDUKE32_STANDALONE
-            case TOILET__STATIC:
-            case STALL__STATIC:
+            case TOILET__:
+            case STALL__:
                 if (pPlayer->last_pissed_time == 0)
                 {
                     if (ud.lockout == 0)
@@ -3400,7 +3432,7 @@ void P_CheckSectors(int playerNum)
                     A_PlaySound(FLUSH_TOILET,nearSprite);
                 return;
 
-            case NUKEBUTTON__STATIC:
+            case NUKEBUTTON__:
             {
                 int wallNum;
 
@@ -3429,7 +3461,7 @@ void P_CheckSectors(int playerNum)
                 return;
             }
 
-            case WATERFOUNTAIN__STATIC:
+            case WATERFOUNTAIN__:
                 if (actor[nearSprite].t_data[0] != 1)
                 {
                     actor[nearSprite].t_data[0] = 1;
@@ -3443,7 +3475,7 @@ void P_CheckSectors(int playerNum)
                 }
                 return;
 
-            case PLUG__STATIC:
+            case PLUG__:
                 A_PlaySound(SHORT_CIRCUIT, pPlayer->i);
                 sprite[pPlayer->i].extra -= 2+(krand()&3);
 
@@ -3451,8 +3483,8 @@ void P_CheckSectors(int playerNum)
                 break;
 #endif
 
-            case VIEWSCREEN__STATIC:
-            case VIEWSCREEN2__STATIC:
+            case VIEWSCREEN__:
+            case VIEWSCREEN2__:
                 // Try to find a camera sprite for the viewscreen.
                 for (bssize_t SPRITES_OF(STAT_ACTOR, spriteNum))
                 {
@@ -3481,7 +3513,7 @@ void P_CheckSectors(int playerNum)
             }  // switch
         }
 
-        if (TEST_SYNC_KEY(g_player[playerNum].input->bits, SK_OPEN) == 0)
+        if (TEST_SYNC_KEY(g_player[playerNum].input.bits, SK_OPEN) == 0)
             return;
 
         if (pPlayer->newowner >= 0)

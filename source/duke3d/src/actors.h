@@ -37,11 +37,11 @@ extern "C" {
 #define ZOFFSET4            (12<<8)
 #define ZOFFSET5            (32<<8)
 #define ZOFFSET6            (4<<8)
+#define ZOFFSET7            (18<<8)
 
 #define ACTOR_MAXFALLINGZVEL 6144
 #define ACTOR_ONWATER_ADDZ (24<<8)
 
-// KEEPINSYNC lunatic/con_lang.lua
 #define STAT_DEFAULT        0
 #define STAT_ACTOR          1
 #define STAT_ZOMBIEACTOR    2
@@ -115,39 +115,10 @@ enum actionflags
     AF_VIEWPOINT = 1u<<0u,
 };
 
-#ifdef LUNATIC
-struct action
-{
-    // These members MUST be in this exact order because FFI cdata of this type
-    // can be initialized by passing a table with numeric indices (con.action).
-    int16_t startframe, numframes;
-    int16_t viewtype, incval, delay;
-    uint16_t flags;
-};
-
-struct move
-{
-    // These members MUST be in this exact order.
-    int16_t hvel, vvel;
-};
-
-#pragma pack(push,1)
-typedef struct { int32_t id; struct move mv; } con_move_t;
-typedef struct { int32_t id; struct action ac; } con_action_t;
-#pragma pack(pop)
-#endif
-
-// Select an actor's actiontics and movflags locations depending on
-// whether we compile the Lunatic build.
 // <spr>: sprite pointer
 // <a>: actor_t pointer
-#ifdef LUNATIC
-# define AC_ACTIONTICS(spr, a) ((a)->actiontics)
-# define AC_MOVFLAGS(spr, a) ((a)->movflags)
-#else
-# define AC_ACTIONTICS(spr, a) ((spr)->lotag)
-# define AC_MOVFLAGS(spr, a) ((spr)->hitag)
-#endif
+#define AC_ACTIONTICS(spr, a) ((spr)->lotag)
+#define AC_MOVFLAGS(spr, a) ((spr)->hitag)
 
 // (+ 40 16 16 4 8 6 8 6 4 20)
 #pragma pack(push, 1)
@@ -155,34 +126,29 @@ typedef struct
 {
     int32_t t_data[10];  // 40b sometimes used to hold offsets to con code
 
-#ifdef LUNATIC
-    // total: 18b
-    struct move   mv;
-    struct action ac;
-    // Gets incremented by TICSPERFRAME on each A_Execute() call:
-    uint16_t actiontics;
-    // Movement flags, sprite[i].hitag in C-CON:
-    uint16_t movflags;
-#endif
+    uint32_t flags;                 // 4b
+    vec3_t   bpos;                  // 12b
+    int32_t  floorz, ceilingz;      // 8b
+    vec2_t   lastv;                 // 8b
+    int16_t  picnum, ang;           // 4b
+    int16_t  extra, owner;          // 4b
+    int16_t  movflag, tempang;      // 4b
+    int16_t  timetosleep, stayput;  // 4b
+    uint16_t florhit, lzsum;        // 4b
+    int16_t  dispicnum;             // 2b NOTE: updated every frame, not in sync with game tics!    
+    uint8_t  cgg, lasttransport;    // 2b
+} actor_t;
 
-    int32_t flags;                             // 4b
-    vec3_t  bpos;                              // 12b
-    int32_t floorz, ceilingz;                  // 8b
-    vec2_t lastv;                              // 8b
-    int16_t picnum, ang, extra, owner;         // 8b
-    int16_t movflag, tempang, timetosleep;     // 6b
-    int16_t stayput;                           // 2b
-
-    uint8_t cgg, lasttransport;                // 2b
-    // NOTE: 'dispicnum' is updated every frame, not in sync with game tics!
-    int16_t dispicnum;                         // 2b
+EDUKE32_STATIC_ASSERT(sizeof(actor_t) == 96);
 
 #ifdef POLYMER
-    int16_t lightId, lightmaxrange;  // 4b
+typedef struct  
+{
     _prlight *lightptr;              // 4b/8b  aligned on 96 bytes
-    uint8_t lightcount, filler[3];
+    int16_t lightId, lightmaxrange;  // 4b
+    uint8_t lightcount, filler[3];   // 4b
+} practor_t;
 #endif
-} actor_t;
 
 // note: fields in this struct DO NOT have to be in this order,
 // however if you add something to this struct, please make sure
@@ -206,26 +172,6 @@ typedef struct netactor_s
         t_data_7,
         t_data_8,
         t_data_9;
-
-#ifdef LUNATIC
-
-    int32_t
-        hvel,
-        vvel;
-
-
-    int32_t
-        startframe,
-        numframes;
-
-    int32_t
-        viewtype,
-        incval,
-        delay;
-
-    int32_t
-        actiontics;
-#endif
 
     int32_t
         flags;
@@ -255,11 +201,6 @@ typedef struct netactor_s
 
         stayput,
         dispicnum;
-
-
-#if defined LUNATIC
-    int32_t movflags;
-#endif
 
     // note: lightId, lightcount, lightmaxrange are not synchronized between client and server
 
@@ -354,10 +295,8 @@ typedef struct netactor_s
 
 typedef struct
 {
-#if !defined  LUNATIC
     intptr_t *execPtr;  // pointer to CON script for this tile, formerly actorscrptr
     intptr_t *loadPtr;  // pointer to load time CON script, formerly actorLoadEventScrPtr or something
-#endif
     projectile_t *proj;
     projectile_t *defproj;
     uint32_t      flags;       // formerly SpriteFlags, ActorType
@@ -365,8 +304,7 @@ typedef struct
 } tiledata_t;
 
 
-// KEEPINSYNC lunatic/con_lang.lua
-enum sflags_t
+enum sflags_t : unsigned int
 {
     SFLAG_SHADOW        = 0x00000001,
     SFLAG_NVG           = 0x00000002,
@@ -399,11 +337,14 @@ enum sflags_t
     SFLAG_DAMAGEEVENT      = 0x04000000,
     SFLAG_NOWATERSECTOR    = 0x08000000,
     SFLAG_QUEUEDFORDELETE  = 0x10000000,
+    SFLAG_RESERVED         = 0x20000000,
+    SFLAG_RESERVED2        = 0x40000000,
+    SFLAG_RESERVED3        = 0x80000000,
 };
 
 // Custom projectiles "workslike" flags.
 // XXX: Currently not predefined from CON.
-enum pflags_t
+enum pflags_t : unsigned int
 {
     PROJECTILE_HITSCAN           = 0x00000001,
     PROJECTILE_RPG               = 0x00000002,
@@ -434,6 +375,9 @@ enum pflags_t
 
 extern tiledata_t   g_tile[MAXTILES];
 extern actor_t      actor[MAXSPRITES];
+#ifdef POLYMER
+extern practor_t    practor[MAXSPRITES];
+#endif
 extern int32_t      block_deletesprite;
 extern int32_t      g_noEnemies;
 extern int32_t      otherp;
@@ -448,7 +392,7 @@ void A_AddToDeleteQueue(int spriteNum);
 void A_DeleteSprite(int spriteNum);
 void A_DoGuts(int spriteNum, int tileNum, int spawnCnt);
 void A_DoGutsDir(int spriteNum, int tileNum, int spawnCnt);
-int A_GetClipdist(int spriteNum, int clipDist);
+int A_GetClipdist(int spriteNum);
 void A_MoveCyclers(void);
 void A_MoveDummyPlayers(void);
 void A_MoveSector(int spriteNum);
@@ -469,10 +413,6 @@ void                Sect_ToggleInterpolation(int sectnum, int setInterpolation);
 static FORCE_INLINE void   Sect_ClearInterpolation(int sectnum) { Sect_ToggleInterpolation(sectnum, 0); }
 static FORCE_INLINE void   Sect_SetInterpolation(int sectnum) { Sect_ToggleInterpolation(sectnum, 1); }
 
-#ifdef LUNATIC
-int32_t G_ToggleWallInterpolation(int32_t w, int32_t doset);
-#endif
-
 #if KRANDDEBUG
 # define ACTOR_INLINE __fastcall
 # define ACTOR_INLINE_HEADER extern __fastcall
@@ -481,10 +421,10 @@ int32_t G_ToggleWallInterpolation(int32_t w, int32_t doset);
 # define ACTOR_INLINE_HEADER EXTERN_INLINE_HEADER
 #endif
 
-extern int32_t A_MoveSpriteClipdist(int32_t spritenum, vec3_t const * change, uint32_t cliptype, int32_t clipdist);
+extern int32_t A_MoveSpriteClipdist(int32_t spritenum, vec3_t const &change, uint32_t cliptype, int32_t clipdist);
 ACTOR_INLINE_HEADER int A_CheckEnemyTile(int tileNum);
 ACTOR_INLINE_HEADER int A_SetSprite(int spriteNum, uint32_t cliptype);
-ACTOR_INLINE_HEADER int32_t A_MoveSprite(int spriteNum, vec3_t const * change, uint32_t cliptype);
+ACTOR_INLINE_HEADER int32_t A_MoveSprite(int spriteNum, vec3_t const &change, uint32_t cliptype);
 
 EXTERN_INLINE_HEADER int G_CheckForSpaceCeiling(int sectnum);
 EXTERN_INLINE_HEADER int G_CheckForSpaceFloor(int sectnum);
@@ -506,21 +446,23 @@ ACTOR_INLINE int A_CheckEnemyTile(int const tileNum)
 
 ACTOR_INLINE int A_SetSprite(int const spriteNum, uint32_t cliptype)
 {
-    vec3_t const davect = { (sprite[spriteNum].xvel * (sintable[(sprite[spriteNum].ang + 512) & 2047])) >> 14,
-                      (sprite[spriteNum].xvel * (sintable[sprite[spriteNum].ang & 2047])) >> 14, sprite[spriteNum].zvel };
-    return (A_MoveSprite(spriteNum, &davect, cliptype) == 0);
+    return (A_MoveSprite(spriteNum,
+                         { (sprite[spriteNum].xvel * (sintable[(sprite[spriteNum].ang + 512) & 2047])) >> 14,
+                           (sprite[spriteNum].xvel * (sintable[sprite[spriteNum].ang & 2047])) >> 14, sprite[spriteNum].zvel },
+                         cliptype) == 0);
 }
 
 ACTOR_INLINE int A_SetSpriteNoZ(int const spriteNum, uint32_t cliptype)
 {
-    vec3_t const davect = { (sprite[spriteNum].xvel * (sintable[(sprite[spriteNum].ang + 512) & 2047])) >> 14,
-                      (sprite[spriteNum].xvel * (sintable[sprite[spriteNum].ang & 2047])) >> 14, 0 };
-    return (A_MoveSprite(spriteNum, &davect, cliptype) == 0);
+    return (A_MoveSprite(spriteNum,
+                         { (sprite[spriteNum].xvel * (sintable[(sprite[spriteNum].ang + 512) & 2047])) >> 14,
+                           (sprite[spriteNum].xvel * (sintable[sprite[spriteNum].ang & 2047])) >> 14, 0 },
+                         cliptype) == 0);
 }
 
-ACTOR_INLINE int32_t A_MoveSprite(int const spriteNum, vec3_t const * const change, uint32_t cliptype)
+ACTOR_INLINE int32_t A_MoveSprite(int const spriteNum, vec3_t const &change, uint32_t cliptype)
 {
-    return A_MoveSpriteClipdist(spriteNum, change, cliptype, -1);
+    return A_MoveSpriteClipdist(spriteNum, change, cliptype, A_GetClipdist(spriteNum));
 }
 
 # endif

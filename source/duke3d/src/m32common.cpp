@@ -345,7 +345,7 @@ mapundo_t *mapstate = NULL;
 
 int32_t map_revision = 1;
 
-static int32_t try_match_with_prev(int32_t idx, int32_t numsthgs, uintptr_t crc)
+static int32_t try_match_with_prev(int32_t idx, int32_t numsthgs, XXH64_hash_t crc)
 {
     if (mapstate->prev && mapstate->prev->num[idx]==numsthgs && mapstate->prev->crc[idx]==crc)
     {
@@ -360,7 +360,7 @@ static int32_t try_match_with_prev(int32_t idx, int32_t numsthgs, uintptr_t crc)
     return 0;
 }
 
-static void create_compressed_block(int32_t idx, const void *srcdata, uint32_t size, uintptr_t crc)
+static void create_compressed_block(int32_t idx, const void *srcdata, uint32_t size, XXH64_hash_t crc)
 {
     // allocate
     int const compressed_size = LZ4_compressBound(size);
@@ -451,24 +451,14 @@ void create_map_snapshot(void)
 
     if (numsectors)
     {
-#if !defined UINTPTR_MAX
-# error Need UINTPTR_MAX define to select between 32- and 64-bit functions
-#endif
-#if UINTPTR_MAX == 0xffffffff
-        /* 32-bit */
-#define XXH__ XXH32
-#else
-        /* 64-bit */
-#define XXH__ XXH64
-#endif
-        uintptr_t temphash = XXH__((uint8_t *)sector, numsectors*sizeof(sectortype), numsectors*sizeof(sectortype));
+        XXH64_hash_t temphash = XXH3_64bits((uint8_t *)sector, numsectors*sizeof(sectortype));
 
         if (!try_match_with_prev(0, numsectors, temphash))
             create_compressed_block(0, sector, numsectors*sizeof(sectortype), temphash);
 
         if (numwalls)
         {
-            temphash = XXH__((uint8_t *)wall, numwalls*sizeof(walltype), numwalls*sizeof(walltype));
+            temphash = XXH3_64bits((uint8_t *)wall, numwalls*sizeof(walltype));
 
             if (!try_match_with_prev(1, numwalls, temphash))
                 create_compressed_block(1, wall, numwalls*sizeof(walltype), temphash);
@@ -476,7 +466,7 @@ void create_map_snapshot(void)
 
         if (Numsprites)
         {
-            temphash = XXH__((uint8_t *)sprite, MAXSPRITES*sizeof(spritetype), MAXSPRITES*sizeof(spritetype));
+            temphash = XXH3_64bits((uint8_t *)sprite, MAXSPRITES*sizeof(spritetype));
 
             if (!try_match_with_prev(2, Numsprites, temphash))
             {
@@ -495,7 +485,6 @@ void create_map_snapshot(void)
                 Xfree(uspri);
             }
         }
-#undef XXH__
     }
 
     CheckMapCorruption(5, 0);
@@ -536,6 +525,7 @@ int32_t map_undoredo(int dir)
     {
         // restore sector[]
         auto bytes = LZ4_decompress_safe(mapstate->lz4Blocks[UNDO_SECTORS]+4, (char*)sector, mapstate->lz4Size[UNDO_SECTORS], MAXSECTORS*sizeof(sectortype));
+        UNREFERENCED_PARAMETER(bytes);
         Bassert(bytes > 0);
 
         if (mapstate->num[UNDO_WALLS])  // restore wall[]
@@ -1429,12 +1419,6 @@ too_many_errors:
 #define MENU_BG_COLOR editorcolors[0]
 #define MENU_BG_COLOR_SEL editorcolors[1]
 
-#ifdef LUNATIC
-# define MENU_HAVE_DESCRIPTION 1
-#else
-# define MENU_HAVE_DESCRIPTION 0
-#endif
-
 typedef struct StatusBarMenu_ {
     const char *const menuname;
     const int32_t custom_start_index;
@@ -1451,31 +1435,6 @@ typedef struct StatusBarMenu_ {
     { MenuName, 0, 0, ProcessFunc, {}, {}, {} }
 #define MENU_INITIALIZER(MenuName, CustomStartIndex, ProcessFunc, ...) \
     { MenuName, CustomStartIndex, CustomStartIndex, ProcessFunc, {}, {}, ## __VA_ARGS__ }
-
-#ifdef LUNATIC
-static void M_Clear(StatusBarMenu *m)
-{
-    int32_t i;
-
-    m->numentries = 0;
-    Bmemset(m->auxdata, 0, sizeof(m->auxdata));
-    Bmemset(m->name, 0, sizeof(m->name));
-
-    for (i=0; i<MENU_MAX_ENTRIES; i++)
-        DO_FREE_AND_NULL(m->description[i]);
-}
-
-static int32_t M_HaveDescription(StatusBarMenu *m)
-{
-    int32_t i;
-
-    for (i=0; i<MENU_MAX_ENTRIES; i++)
-        if (m->description[i] != NULL)
-            return 1;
-
-    return 0;
-}
-#endif
 
 // NOTE: Does not handle description strings! (Only the Lua menu uses them.)
 static void M_UnregisterFunction(StatusBarMenu *m, intptr_t auxdata)
@@ -1500,7 +1459,7 @@ static void M_UnregisterFunction(StatusBarMenu *m, intptr_t auxdata)
         }
 }
 
-static void M_RegisterFunction(StatusBarMenu *m, const char *name, intptr_t auxdata, const char *description)
+static void M_RegisterFunction(StatusBarMenu *m, const char *name, intptr_t auxdata)
 {
     int32_t i;
 
@@ -1525,14 +1484,6 @@ static void M_RegisterFunction(StatusBarMenu *m, const char *name, intptr_t auxd
 
     Bstrncpyz(m->name[m->numentries], name, MENU_ENTRY_SIZE);
     m->auxdata[m->numentries] = auxdata;
-
-#if MENU_HAVE_DESCRIPTION
-    // NOTE: description only handled here (not above).
-    if (description)
-        m->description[m->numentries] = Xstrdup(description);
-#else
-    UNREFERENCED_PARAMETER(description);
-#endif
 
     m->numentries++;
 }
@@ -1640,19 +1591,6 @@ static void M_EnterMainLoop(StatusBarMenu *m)
             break;
         }
 
-#if MENU_HAVE_DESCRIPTION
-        if (M_HaveDescription(m))
-        {
-            const int32_t maxrows = 20;
-            int32_t r;
-
-            for (r=0; r<maxrows+1; r++)
-                printext16(16-4, 16-4 + r*8, 0, MENU_BG_COLOR,  // 71 blanks:
-                           "                                                                       ", 0);
-            if (m->description[col*8 + row] != NULL)
-                printext16(16, 16, MENU_FG_COLOR, MENU_BG_COLOR, m->description[col*8 + row], 0);
-        }
-#endif
         printext16(xpos, ypos+row*MENU_Y_SPACING, MENU_FG_COLOR, MENU_BG_COLOR_SEL, disptext, 0);
         videoShowFrame(1);
     }
@@ -1692,7 +1630,7 @@ void FuncMenu(void)
 void registerMenuFunction(const char *funcname, int32_t stateidx)
 {
     if (funcname)
-        M_RegisterFunction(&g_specialFuncMenu, funcname, stateidx, NULL);
+        M_RegisterFunction(&g_specialFuncMenu, funcname, stateidx);
     else
         M_UnregisterFunction(&g_specialFuncMenu, stateidx);
 }
@@ -1776,13 +1714,14 @@ static void FuncMenu_Process(const StatusBarMenu *m, int32_t col, int32_t row)
         {
             char tempbuf[64];
             Bsprintf(tempbuf,"Delete all sprites of tile #: ");
-            i = getnumber16(tempbuf,-1,MAXSPRITES-1,1);
+            i = getnumber16(tempbuf,-1,MAXTILES-1,1);
             if (i >= 0)
             {
                 int32_t k = 0;
                 for (j=0; j<MAXSPRITES; j++)
                     if (sprite[j].picnum == i)
-                        deletesprite(j), k++;
+                        if (deletesprite(j) == 0)
+                            k++;
                 printmessage16("%d sprite(s) deleted",k);
             }
             else printmessage16("Aborted");
@@ -1985,63 +1924,3 @@ void m32_showmouse()
     }
 #endif
 }
-
-#ifdef LUNATIC
-typedef const char *(*luamenufunc_t)(void);
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-extern void LM_Register(const char *name, luamenufunc_t funcptr, const char *description);
-extern void LM_Clear(void);
-#ifdef __cplusplus
-}
-#endif
-
-static int32_t g_numLuaFuncs = 0;
-static luamenufunc_t g_LuaFuncPtrs[MENU_MAX_ENTRIES];
-
-static void LuaFuncMenu_Process(const StatusBarMenu *m, int32_t col, int32_t row)
-{
-    luamenufunc_t func = g_LuaFuncPtrs[col*8 + row];
-    const char *errmsg;
-
-    Bassert(func != NULL);
-    errmsg = func();
-
-    if (errmsg == NULL)
-    {
-        printmessage16("Lua function executed successfully");
-    }
-    else
-    {
-        printmessage16("There were errors executing the Lua function, see OSD");
-        OSD_Printf("Errors executing Lua function \"%s\": %s\n", m->name[col*8 + row], errmsg);
-    }
-}
-
-static StatusBarMenu g_LuaFuncMenu = MENU_INITIALIZER_EMPTY("Lua functions", LuaFuncMenu_Process);
-
-void LuaFuncMenu(void)
-{
-    M_EnterMainLoop(&g_LuaFuncMenu);
-}
-
-LUNATIC_EXTERN void LM_Register(const char *name, luamenufunc_t funcptr, const char *description)
-{
-    if (name == NULL || g_numLuaFuncs == MENU_MAX_ENTRIES)
-        return;
-
-    g_LuaFuncPtrs[g_numLuaFuncs] = funcptr;
-    M_RegisterFunction(&g_LuaFuncMenu, name, g_numLuaFuncs, description);
-    g_numLuaFuncs++;
-}
-
-LUNATIC_EXTERN void LM_Clear(void)
-{
-    M_Clear(&g_LuaFuncMenu);
-
-    g_numLuaFuncs = 0;
-    Bmemset(g_LuaFuncPtrs, 0, sizeof(g_LuaFuncPtrs));
-}
-#endif

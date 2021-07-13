@@ -41,14 +41,9 @@ extern int32_t g_mostConcurrentPlayers;
 #define HORIZ_MAX                   299
 #define AUTO_AIM_ANGLE              48
 #define PHEIGHT                     (38<<8)
-#define PCROUCHHEIGHT               (16<<8)
-#define PCROUCHINCREMENT            (2048+768)
 #define PMINHEIGHT                  1024 // this is NOT the value I wanted here, but Duke It Out in DC's shitty vents said otherwise
 
 #define PCRACKTIME                  777
-
-#define PWATERSPEEDMODIFIER         0x1400
-#define PCROUCHSPEEDMODIFIER        0x2000
 
 #define TRIPBOMB_TRIPWIRE       0x00000001
 #define TRIPBOMB_TIMER          0x00000002
@@ -59,6 +54,47 @@ extern int32_t g_mostConcurrentPlayers;
 #define WEAPON_POS_LOWER            (-9)
 #define WEAPON_POS_RAISE            10
 #define WEAPON_POS_START             6
+
+enum weaponuniqhudid_t
+{
+    W_ACCESSCARD,
+    W_CHAINGUN_BOTTOM,
+    W_CHAINGUN_HACK,
+    W_CHAINGUN_TOP,
+    W_DEVISTATOR_LEFT,
+    W_DEVISTATOR_RIGHT,
+    W_DUKENUKEM,
+    W_FIST,
+    W_FIST2,
+    W_FREEZE_BASE,
+    W_FREEZE_TOP,
+    W_HANDBOMB,
+    W_HANDREMOTE,
+    W_KNEE,
+    W_KNEE2,
+    W_KNUCKLES,
+    W_LOOGIE,
+    W_LOOGIE_END = W_LOOGIE + 63,
+    W_PISTOL,
+    W_PISTOL_CLIP,
+    W_PISTOL_HAND,
+    W_PLUTOPAK,
+    W_RPG,
+    W_RPG_MUZZLE,
+    W_SHOTGUN,
+    W_SHOTGUN_MUZZLE,
+    W_SHRINKER,
+    W_SHRINKER_CRYSTAL,
+    W_THREEDEE,
+    W_TIP,
+    W_TRIPBOMB,
+    W_TRIPBOMB_LEFTHAND,
+    W_TRIPBOMB_RIGHTHAND,
+
+    W_END,
+};
+
+EDUKE32_STATIC_ASSERT(W_END < MAXUNIQHUDID);
 
 enum weaponflags_t {
     WEAPON_SPAWNTYPE1           = 0x00000000, // just spawn
@@ -112,6 +148,10 @@ enum playeraction_t {
     pfacing                     = 0x00010000
 };
 
+#define AM_MOUSE 1
+#define AM_CENTERING 2
+#define AM_AIMASSIST 4
+
 typedef struct {
     vec3_t pos;
     int16_t ang, sect;
@@ -120,26 +160,26 @@ typedef struct {
 typedef struct {
     int16_t got_access, last_extra, inv_amount[GET_MAX], curr_weapon, holoduke_on;
     int16_t last_weapon, weapon_pos, kickback_pic;
-    int16_t ammo_amount[MAX_WEAPONS], frag[MAXPLAYERS];
+    int16_t ammo_amount[MAX_WEAPONS];
+    uint16_t frag[MAXPLAYERS];
     uint16_t gotweapon;
     char inven_icon, jetpack_on, heat_on;
 } DukeStatus_t;
 
+#pragma pack(push,1)
 typedef struct {
     uint32_t bits;
     int16_t fvel, svel;
     fix16_t q16avel, q16horz;
-    uint8_t extbits;
+    uint32_t extbits;
 } input_t;
 
-#pragma pack(push,1)
 // XXX: r1625 changed a lot types here, among others
 //  * int32_t --> int16_t
 //  * int16_t --> int8_t
 //  * char --> int8_t
 // Need to carefully think about implications!
 // TODO: rearrange this if the opportunity arises!
-// KEEPINSYNC lunatic/_defs_game.lua
 typedef struct {
     vec3_t pos, opos;
     vec3_t vel, npos;
@@ -153,17 +193,24 @@ typedef struct {
     int32_t autostep, autostep_sbw;
 
     uint32_t interface_toggle;
-#ifdef LUNATIC
-    int32_t pipebombControl, pipebombLifetime, pipebombLifetimeVar;
-    int32_t tripbombControl, tripbombLifetime, tripbombLifetimeVar;
 
-    int32_t zrange;
-    int16_t angrange, autoaimang;
-#endif
+    palette_t pals;
+
     uint16_t max_actors_killed, actors_killed;
     uint16_t gotweapon, zoom;
 
-    int16_t loogiex[64], loogiey[64], sbs, sound_pitch;
+    uint16_t frag, fraggedself;
+
+    vec2_16_t loogie[6];
+    int16_t filler[103]; // jesus fucking christ
+
+    int16_t floorzoffset, spritezoffset, minwaterzdist, waterzoffset, shrunkzoffset;
+    int16_t crouchzincrement, crouchspeedmodifier, swimspeedmodifier;
+    int16_t swimzincrement, minswimzvel, maxswimzvel;
+    int16_t jetpackzincrement;
+
+    int16_t gravity;
+    int16_t sbs, sound_pitch;
 
     int16_t cursectnum, look_ang, last_extra, subweapon;
     int16_t max_ammo_amount[MAX_WEAPONS], ammo_amount[MAX_WEAPONS], inv_amount[GET_MAX];
@@ -184,8 +231,7 @@ typedef struct {
     int16_t transporter_hold, clipdist;
 
     uint8_t max_secret_rooms, secret_rooms;
-    // XXX: 255 values for frag(gedself) seems too small.
-    uint8_t frag, fraggedself, quick_kick, last_quick_kick;
+    uint8_t quick_kick, last_quick_kick;
     uint8_t return_to_center, reloading, weapreccnt;
     uint8_t aim_mode, auto_aim, weaponswitch, movement_lock, team;
     uint8_t tipincs, hbomb_hold_delay, frag_ps, kickback_pic;
@@ -207,39 +253,33 @@ typedef struct {
     int8_t last_weapon, cheat_phase, weapon_pos, wantweaponfire, curr_weapon;
 
     uint8_t palette;
-    palette_t pals;
-
     int8_t last_used_weapon;
 
-#ifdef LUNATIC
-    int8_t palsfadespeed, palsfadenext, palsfadeprio, padding2_;
-
-    // The player index. Always valid since we have no loose DukePlayer_t's
-    // anywhere (like with spritetype_t): g_player[i].ps->wa.idx == i.
-    struct { int32_t idx; } wa;
-#endif
-
     int8_t crouch_toggle;
-    int8_t padding_[3];
+    int8_t padding_[1];
 } DukePlayer_t;
 
-// KEEPINSYNC lunatic/_defs_game.lua
+EDUKE32_STATIC_ASSERT(sizeof(DukePlayer_t) % 4 == 0);
+EDUKE32_STATIC_ASSERT(sizeof(DukePlayer_t) == 640); // this needs to stay the same size for savegame compatibility
+
 typedef struct
 {
     DukePlayer_t *ps;
-    input_t *input;
+    input_t input;
 
-    bool    horizRecenter;
-    float   horizAngleAdjust;
-    fix16_t horizSkew;
+    int horizRecenter;
+    int horizAngleAdjust;
+    int horizSkew;
+
+    double lastViewUpdate;
 
     int32_t netsynctime;
-    int16_t ping, filler;
     int32_t pcolor, pteam;
+    int16_t ping;
     // NOTE: wchoice[HANDREMOTE_WEAPON .. MAX_WEAPONS-1] unused
     uint8_t frags[MAXPLAYERS], wchoice[MAX_WEAPONS];
 
-
+    char smoothcamera;
     char vote, gotvote, pingcnt, playerquitflag,
         ready; // currently unused. May be used later to indicate that a player has pressed use on intermission to indicate they are ready to go on to the next map
     char user_name[32];
@@ -247,7 +287,6 @@ typedef struct
 } playerdata_t;
 #pragma pack(pop)
 
-// KEEPINSYNC lunatic/con_lang.lua
 typedef struct
 {
     // NOTE: the member names must be identical to aplWeapon* suffixes.
@@ -272,11 +311,7 @@ typedef struct
     int32_t FlashColor;  // Muzzle flash color
 } weapondata_t;
 
-#ifdef LUNATIC
-# define PWEAPON(Player, Weapon, Wmember) (g_playerWeapon[Player][Weapon].Wmember)
-extern weapondata_t g_playerWeapon[MAXPLAYERS][MAX_WEAPONS];
-#else
-# define PWEAPON(Player, Weapon, Wmember) (aplWeapon ## Wmember [Weapon][Player])
+#define PWEAPON(Player, Weapon, Wmember) (aplWeapon ## Wmember [Weapon][Player])
 extern intptr_t         *aplWeaponClip[MAX_WEAPONS];            // number of items in clip
 extern intptr_t         *aplWeaponReload[MAX_WEAPONS];          // delay to reload (include fire)
 extern intptr_t         *aplWeaponFireDelay[MAX_WEAPONS];       // delay to fire
@@ -296,7 +331,6 @@ extern intptr_t         *aplWeaponReloadSound1[MAX_WEAPONS];    // Sound of maga
 extern intptr_t         *aplWeaponReloadSound2[MAX_WEAPONS];    // Sound of magazine being inserted
 extern intptr_t         *aplWeaponSelectSound[MAX_WEAPONS];     // Sound for weapon selection
 extern intptr_t         *aplWeaponFlashColor[MAX_WEAPONS];      // Color for polymer muzzle flash
-#endif
 
 typedef struct {
     int32_t workslike, cstat; // 8b
@@ -314,7 +348,6 @@ typedef struct {
     int32_t userdata; // 4b
 } projectile_t;
 
-// KEEPINSYNC lunatic/_defs_game.lua
 typedef struct {
     int32_t cur, count;  // "cur" is the only member that is *used*
     int32_t gunposx, lookhalfang;  // weapon_xoffset, ps->look_ang>>1
@@ -333,6 +366,7 @@ extern int32_t          g_numObituaries;
 extern int32_t          g_numSelfObituaries;
 extern int32_t          mouseyaxismode;
 extern int32_t          ticrandomseed;
+extern double           g_lastInputTicks;
 
 #define SHOOT_HARDCODED_ZVEL INT32_MIN
 
@@ -344,24 +378,16 @@ static inline int A_Shoot(int spriteNum, int projecTile)
 
 static inline void P_PalFrom(DukePlayer_t *pPlayer, uint8_t f, uint8_t r, uint8_t g, uint8_t b)
 {
-#ifdef LUNATIC
-    // Compare with _defs_game.lua: player[]:_palfrom().
-    if (pPlayer->pals.f == 0 || pPlayer->palsfadeprio <= 0)
-#endif
-    {
-        pPlayer->pals.f = f;
-        pPlayer->pals.r = r;
-        pPlayer->pals.g = g;
-        pPlayer->pals.b = b;
-#ifdef LUNATIC
-        pPlayer->palsfadespeed = pPlayer->palsfadenext = 0;
-#endif
-    }
+    pPlayer->pals.f = f;
+    pPlayer->pals.r = r;
+    pPlayer->pals.g = g;
+    pPlayer->pals.b = b;
 }
 
 void    P_AddKills(DukePlayer_t * pPlayer, uint16_t kills);
 int32_t A_GetHitscanRange(int spriteNum);
 void    P_GetInput(int playerNum);
+void P_UpdateAngles(int const playerNum, input_t const &input);
 void P_AddAmmo(DukePlayer_t * pPlayer, int weaponNum, int addAmount);
 void    P_AddWeapon(DukePlayer_t *pPlayer, int weaponNum, int switchWeapon);
 void    P_CheckWeapon(DukePlayer_t *pPlayer);
@@ -376,7 +402,6 @@ void    P_QuickKill(DukePlayer_t *pPlayer);
 void    P_SelectNextInvItem(DukePlayer_t *pPlayer);
 void    P_UpdateScreenPal(DukePlayer_t *pPlayer);
 void    P_EndLevel(void);
-void    P_CheckWeaponI(int playerNum);
 int     P_GetHudPal(const DukePlayer_t *pPlayer);
 int     P_GetKneePal(const DukePlayer_t *pPlayer);
 #ifdef __cplusplus
@@ -388,15 +413,7 @@ int     P_GetOverheadPal(const DukePlayer_t *pPlayer);
 
 int Proj_GetDamage(projectile_t const *pProj);
 
-#if !defined LUNATIC
 void P_SetWeaponGamevars(int playerNum, const DukePlayer_t *pPlayer);
-#else
-static inline void P_SetWeaponGamevars(int playerNum, const DukePlayer_t *pPlayer)
-{
-    UNREFERENCED_PARAMETER(playerNum);
-    UNREFERENCED_PARAMETER(pPlayer);
-}
-#endif
 
 // Get the player index given an APLAYER sprite pointer.
 static inline int P_GetP(const void *pSprite)

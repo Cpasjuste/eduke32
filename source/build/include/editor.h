@@ -165,9 +165,6 @@ typedef struct mapundo_
 extern mapundo_t *mapstate;
 
 extern void FuncMenu(void);
-#ifdef LUNATIC
-extern void LuaFuncMenu(void);
-#endif
 
 // editor side view
 extern int32_t m32_sideview;
@@ -188,7 +185,6 @@ extern void editorSetup2dSideView(void);
 extern int8_t keeptexturestretch;
 extern int16_t pointhighlightdist, linehighlightdist;
 
-extern int32_t wallength(int16_t i);
 extern void fixrepeats(int16_t i);
 extern uint32_t getlenbyrep(int32_t len, int32_t repeat);
 extern void fixxrepeat(int16_t wallnum, uint32_t lenrepquot);

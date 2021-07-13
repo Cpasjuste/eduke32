@@ -50,7 +50,8 @@ enum cvartype_t
     CVAR_INVALIDATEART = 0x00001000,
     CVAR_MODIFIED      = 0x00002000,
 
-    CVAR_TYPEMASK = CVAR_FLOAT | CVAR_DOUBLE | CVAR_INT | CVAR_UINT | CVAR_BOOL | CVAR_STRING
+    CVAR_INTTYPES = CVAR_INT | CVAR_UINT | CVAR_BOOL,
+    CVAR_TYPEMASK = CVAR_FLOAT | CVAR_DOUBLE | CVAR_INTTYPES | CVAR_STRING
 };
 
 typedef struct _symbol
@@ -274,7 +275,7 @@ void OSD_ShowDisplay(int onf);
 void OSD_Draw(void);
 
 // just like printf
-void OSD_Printf(const char *fmt, ...) ATTRIBUTE((format(printf,1,2)));
+int OSD_Printf(const char *fmt, ...) ATTRIBUTE((format(printf,1,2)));
 
 // just like puts
 void OSD_Puts(const char *putstr, int const nolog = false);

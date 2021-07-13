@@ -65,15 +65,16 @@ extern void engineInitClipMaps();
 extern void engineSetClipMap(mapinfo_t *bak, mapinfo_t *newmap);
 
 #endif // HAVE_CLIPSHAPE_FEATURE
-typedef struct
+typedef struct MAY_ALIAS
 {
-    int32_t x1, y1, x2, y2;
+    union { struct { int32_t x1, y1; }; vec2_t p1; };
+    union { struct { int32_t x2, y2; }; vec2_t p2; };
 } linetype;
 
 extern int16_t clipsectorlist[MAXCLIPSECTORS];
 
-int clipinsidebox(vec2_t const * const vect, int const wallnum, int const walldist);
 int clipinsideboxline(int x, int y, int x1, int y1, int x2, int y2, int walldist);
+int clipinsidebox(vec2_t const vect, int const wallnum, int const walldist);
 
 extern int32_t clipmoveboxtracenum;
 

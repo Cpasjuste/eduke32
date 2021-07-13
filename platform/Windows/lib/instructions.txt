@@ -129,26 +129,10 @@ Download SDL2-devel-<version>-mingw.tar.gz
   * Stable: http://www.libsdl.org/download-2.0.php
   * Mercurial: http://hg.libsdl.org/SDL
 ### Build ###
-    sh ./configure && make
+    sh ./configure --disable-libc && make
 ### Desired Results ###
   * headers: SDL_*.h
   * libraries: libSDL2.a libSDL2main.a
-
-SDL_mixer
----------
-### Prerequisites ###
-SDL_mixer depends on the results of SDL to compile.
-NEEDS VERIFICATION: Note that the headers must be installed without the "SDL2" prefix directory.
-### Download ###
-Download SDL2_mixer-devel-<version>-mingw.tar.gz.
-  * Stable: http://www.libsdl.org/projects/SDL_mixer/
-  * Mercurial: http://hg.libsdl.org/SDL_mixer/
-### Build ###
-    sh ./configure && make
-### Desired Results ###
-Note: With just this bare bones setup all the external libraries and formats will be disabled, but that's OK.
-  * headers: SDL_mixer.h
-  * libraries: libSDL2_mixer.a
 
 
 dsound, dxguid, and dxguid_sdl
@@ -160,32 +144,3 @@ See Windows/src/dxlibs.
 ### Desired Results ###
   * headers: ddraw.h dinput.h dsound.h (pre-positioned in Windows/include/dx)
   * libraries: libdsound.a libdxguid.a libdxguid_sdl.a
-
-
-LuaJIT
-------
-### Download ###
-Download: LuaJIT-<version>.tar.gz
-However, Git HEAD is highly recommended.
-  * Stable: http://luajit.org/download.html
-  * Git: git clone http://luajit.org/git/luajit-2.0.git
-### Modifications ###
-  * Modify src/luaconf.h as follows:
-      * #define LUAI_MAXCSTACK 64000 // (instead of the default 8000.)
-### Build ###
-    make BUILDMODE=static
-### Desired Results ###
-  * headers: lauxlib.h lua.h lua.hpp luaconf.h luajit.h lualib.h
-  * libraries: libluajit.a
-
-LPeg
-----
-### Download ###
-Download: lpeg-<version>.tar.gz
-  * Stable: http://www.inf.puc-rio.br/~roberto/lpeg
-### Modifications ###
-  * Apply "lpeg-lunatic.patch".
-### Build ###
-    make liblpeg.a
-### Desired Results ###
-  * libraries: liblpeg.a

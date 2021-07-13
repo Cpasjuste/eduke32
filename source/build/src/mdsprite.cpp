@@ -907,7 +907,7 @@ int32_t mdloadskin(md2model_t *m, int32_t number, int32_t pal, int32_t surf)
         if ((doalloc&3)==1)
             glGenTextures(1, texidx);
 
-        glBindTexture(GL_TEXTURE_2D, *texidx);
+        polymost_bindTexture(GL_TEXTURE_2D, *texidx);
 
         //gluBuild2DMipmaps(GL_TEXTURE_2D,GL_RGBA,xsiz,ysiz,GL_BGRA_EXT,GL_UNSIGNED_BYTE,(char *)fptr);
 
@@ -1197,6 +1197,21 @@ static void mdloadvbos(md3model_t *m)
 #endif
 
 //--------------------------------------- MD2 LIBRARY BEGINS ---------------------------------------
+static void md2free(md2model_t *m)
+{
+    if (!m)
+        return;
+
+    Xfree(m->texid);
+    Xfree(m->skinfn);
+    Xfree(m->basepath);
+    Xfree(m->uv);
+    Xfree(m->tris);
+    Xfree(m->glcmds);
+    Xfree(m->frames);
+    Xfree(m);
+}
+
 static md2model_t *md2load(buildvfs_kfd fil, const char *filnam)
 {
     md2model_t *m;
@@ -1212,7 +1227,8 @@ static md2model_t *md2load(buildvfs_kfd fil, const char *filnam)
     m = (md2model_t *)Xcalloc(1,sizeof(md2model_t));
     m->mdnum = 2; m->scale = .01f;
 
-    kread(fil,(char *)&head,sizeof(md2head_t));
+    if (kread_and_test(fil,(char *)&head,sizeof(md2head_t))) { Xfree(m); return nullptr; }
+
 #if B_BIG_ENDIAN != 0
     head.id = B_LITTLE32(head.id);                 head.vers = B_LITTLE32(head.vers);
     head.skinxsiz = B_LITTLE32(head.skinxsiz);     head.skinysiz = B_LITTLE32(head.skinysiz);
@@ -1242,24 +1258,17 @@ static md2model_t *md2load(buildvfs_kfd fil, const char *filnam)
     m->uv = (md2uv_t *)Xmalloc(head.numuv*sizeof(md2uv_t));
 
     klseek(fil,head.ofsframes,SEEK_SET);
-    if (kread(fil,(char *)m->frames,m->numframes*m->framebytes) != m->numframes*m->framebytes)
-        { Xfree(m->uv); Xfree(m->tris); Xfree(m->glcmds); Xfree(m->frames); Xfree(m); return 0; }
-
+    if (kread_and_test(fil,(char *)m->frames,m->numframes*m->framebytes)) { md2free(m); return nullptr; } 
     if (m->numglcmds > 0)
     {
-        klseek(fil,head.ofsglcmds,SEEK_SET);
-        if (kread(fil,(char *)m->glcmds,m->numglcmds*sizeof(int32_t)) != (int32_t)(m->numglcmds*sizeof(int32_t)))
-            { Xfree(m->uv); Xfree(m->tris); Xfree(m->glcmds); Xfree(m->frames); Xfree(m); return 0; }
+        klseek(fil, head.ofsglcmds, SEEK_SET);
+        if (kread_and_test(fil, (char *)m->glcmds, m->numglcmds * sizeof(int32_t))) { md2free(m); return nullptr; }
     }
 
-    klseek(fil,head.ofstris,SEEK_SET);
-    if (kread(fil,(char *)m->tris,head.numtris*sizeof(md2tri_t)) != (int32_t)(head.numtris*sizeof(md2tri_t)))
-        { Xfree(m->uv); Xfree(m->tris); Xfree(m->glcmds); Xfree(m->frames); Xfree(m); return 0; }
-
-    klseek(fil,head.ofsuv,SEEK_SET);
-    if (kread(fil,(char *)m->uv,head.numuv*sizeof(md2uv_t)) != (int32_t)(head.numuv*sizeof(md2uv_t)))
-        { Xfree(m->uv); Xfree(m->tris); Xfree(m->glcmds); Xfree(m->frames); Xfree(m); return 0; }
-
+    klseek(fil, head.ofstris, SEEK_SET);
+    if (kread_and_test(fil, (char *)m->tris, head.numtris * sizeof(md2tri_t))) { md2free(m); return nullptr; } 
+    klseek(fil, head.ofsuv, SEEK_SET);
+    if (kread_and_test(fil, (char *)m->uv, head.numuv * sizeof(md2uv_t))) { md2free(m); return nullptr; } 
 #if B_BIG_ENDIAN != 0
     {
         char *f = (char *)m->frames;
@@ -1307,8 +1316,7 @@ static md2model_t *md2load(buildvfs_kfd fil, const char *filnam)
     if (m->numskins > 0)
     {
         klseek(fil,head.ofsskins,SEEK_SET);
-        if (kread(fil,m->skinfn,64*m->numskins) != 64*m->numskins)
-            { Xfree(m->glcmds); Xfree(m->frames); Xfree(m); return 0; }
+        if (kread_and_test(fil,m->skinfn,64*m->numskins)) { md2free(m); return nullptr; }
     }
 
     m->texid = (GLuint *)Xcalloc(ournumskins, sizeof(GLuint) * HICTINT_MEMORY_COMBINATIONS);
@@ -1437,7 +1445,7 @@ static md2model_t *md2load(buildvfs_kfd fil, const char *filnam)
     m3->vbos = NULL;
 
     // die MD2 ! DIE !
-    Xfree(m->texid); Xfree(m->skinfn); Xfree(m->basepath); Xfree(m->uv); Xfree(m->tris); Xfree(m->glcmds); Xfree(m->frames); Xfree(m);
+    md2free(m);
 
     return ((md2model_t *)m3);
 }
@@ -1481,6 +1489,7 @@ static inline void quicksort(uint16_t *indexes, float *depths, int32_t first, in
 // END OF QUICKSORT LIB
 
 //--------------------------------------- MD3 LIBRARY BEGINS ---------------------------------------
+static void md3free(md3model_t *m);
 
 static md3model_t *md3load(buildvfs_kfd fil)
 {
@@ -1494,7 +1503,7 @@ static md3model_t *md3load(buildvfs_kfd fil)
 
     m->muladdframes = NULL;
 
-    kread(fil,&m->head,SIZEOF_MD3HEAD_T);
+    if (kread_and_test(fil, &m->head, SIZEOF_MD3HEAD_T)) { md3free(m); return nullptr; }
 
 #if B_BIG_ENDIAN != 0
     m->head.id = B_LITTLE32(m->head.id);             m->head.vers = B_LITTLE32(m->head.vers);
@@ -1505,7 +1514,7 @@ static md3model_t *md3load(buildvfs_kfd fil)
     m->head.eof = B_LITTLE32(m->head.eof);
 #endif
 
-    if ((m->head.id != IDP3_MAGIC) && (m->head.vers != 15)) { Xfree(m); return 0; } //"IDP3"
+    if ((m->head.id != IDP3_MAGIC) && (m->head.vers != 15)) { md3free(m); return nullptr; }
 
     m->numskins = m->head.numskins; //<- dead code?
     m->numframes = m->head.numframes;
@@ -1514,14 +1523,14 @@ static md3model_t *md3load(buildvfs_kfd fil)
 
     klseek(fil,m->head.ofsframes,SEEK_SET); i = m->head.numframes*sizeof(md3frame_t);
     m->head.frames = (md3frame_t *)Xmalloc(i);
-    kread(fil,m->head.frames,i);
+    if (kread_and_test(fil,m->head.frames,i)) { md3free(m); return nullptr; }
 
     if (m->head.numtags == 0) m->head.tags = NULL;
     else
     {
         klseek(fil,m->head.ofstags,SEEK_SET); i = m->head.numtags*sizeof(md3tag_t);
         m->head.tags = (md3tag_t *)Xmalloc(i);
-        kread(fil,m->head.tags,i);
+        if (kread_and_test(fil,m->head.tags,i)) { md3free(m); return nullptr; }
     }
 
     klseek(fil,m->head.ofssurfs,SEEK_SET);
@@ -1554,7 +1563,8 @@ static md3model_t *md3load(buildvfs_kfd fil)
     for (surfi=0; surfi<m->head.numsurfs; surfi++)
     {
         s = &m->head.surfs[surfi];
-        klseek(fil,ofsurf,SEEK_SET); kread(fil,s,SIZEOF_MD3SURF_T);
+        klseek(fil,ofsurf,SEEK_SET);
+        if (kread_and_test(fil,s,SIZEOF_MD3SURF_T)) { md3free(m); return nullptr; }
 
 #if B_BIG_ENDIAN != 0
         {
@@ -1584,10 +1594,10 @@ static md3model_t *md3load(buildvfs_kfd fil)
         s->uv      = (md3uv_t *)(((intptr_t)s->shaders)+leng[1]);
         s->xyzn    = (md3xyzn_t *)(((intptr_t)s->uv)+leng[2]);
 
-        klseek(fil,offs[0],SEEK_SET); kread(fil,s->tris   ,leng[0]);
-        klseek(fil,offs[1],SEEK_SET); kread(fil,s->shaders,leng[1]);
-        klseek(fil,offs[2],SEEK_SET); kread(fil,s->uv     ,leng[2]);
-        klseek(fil,offs[3],SEEK_SET); kread(fil,s->xyzn   ,leng[3]);
+        klseek(fil,offs[0],SEEK_SET); if (kread_and_test(fil,s->tris   ,leng[0])) { md3free(m); return nullptr; }
+        klseek(fil,offs[1],SEEK_SET); if (kread_and_test(fil,s->shaders,leng[1])) { md3free(m); return nullptr; }
+        klseek(fil,offs[2],SEEK_SET); if (kread_and_test(fil,s->uv     ,leng[2])) { md3free(m); return nullptr; }
+        klseek(fil,offs[3],SEEK_SET); if (kread_and_test(fil,s->xyzn   ,leng[3])) { md3free(m); return nullptr; }
 
 #if B_BIG_ENDIAN != 0
         {
@@ -2015,12 +2025,12 @@ void md3_vox_calcmat_common(tspriteptr_t tspr, const vec3f_t *a0, float f, float
     float g;
     float k0, k1, k2, k3, k4, k5, k6, k7;
 
-    k0 = ((float)(tspr->x+spriteext[tspr->owner].position_offset.x-globalposx))*f*(1.f/1024.f);
-    k1 = ((float)(tspr->y+spriteext[tspr->owner].position_offset.y-globalposy))*f*(1.f/1024.f);
+    k0 = ((float)(tspr->x+spriteext[tspr->owner].mdposition_offset.x-globalposx))*f*(1.f/1024.f);
+    k1 = ((float)(tspr->y+spriteext[tspr->owner].mdposition_offset.y-globalposy))*f*(1.f/1024.f);
     f = gcosang2*gshang/gvrcorrection;
     g = gsinang2*gshang/gvrcorrection;
-    k4 = (float)sintable[(tspr->ang+spriteext[tspr->owner].angoff+1024)&2047] * (1.f/16384.f);
-    k5 = (float)sintable[(tspr->ang+spriteext[tspr->owner].angoff+ 512)&2047] * (1.f/16384.f);
+    k4 = (float)sintable[(tspr->ang+spriteext[tspr->owner].mdangoff+1024)&2047] * (1.f/16384.f);
+    k5 = (float)sintable[(tspr->ang+spriteext[tspr->owner].mdangoff+ 512)&2047] * (1.f/16384.f);
     k2 = k0*(1-k4)+k1*k5;
     k3 = k1*(1-k4)-k0*k5;
     k6 = f*gstang - gsinang*gctang; k7 = g*gstang + gcosang*gctang;
@@ -2148,7 +2158,9 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
     a0.z = m->zadd * m->scale;
 
     // Parkar: Moved up to be able to use k0 for the y-flipping code
-    k0 = (float)tspr->z+spriteext[tspr->owner].position_offset.z;
+    k0 = (float)tspr->z+spriteext[tspr->owner].mdposition_offset.z;
+    f = ((globalorientation&8) && (sprite[tspr->owner].cstat&48)!=0) ? -4.f : 4.f;
+    k0 -= (tspr->yoffset*tspr->yrepeat)*f;
     if ((globalorientation&128) && !((globalorientation&48)==32))
         k0 += (float)(sizyrep<<1);
 
@@ -2171,7 +2183,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
     m0.z *= f; m1.z *= f; a0.z *= f;
 
     // floor aligned
-    k1 = (float)tspr->y+spriteext[tspr->owner].position_offset.y;
+    k1 = (float)tspr->y+spriteext[tspr->owner].mdposition_offset.y;
     if ((globalorientation&48)==32)
     {
         m0.z = -m0.z; m1.z = -m1.z; a0.z = -a0.z;
@@ -2184,7 +2196,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
     // calculations below again, but are needed for the base offsets.
     f = (65536.f*512.f)/(fxdimen*fviewingrange);
     g = 32.f/(fxdimen*gxyaspect);
-    m0.y *= f; m1.y *= f; a0.y = (((float)(tspr->x+spriteext[tspr->owner].position_offset.x-globalposx))*  (1.f/1024.f) + a0.y)*f;
+    m0.y *= f; m1.y *= f; a0.y = (((float)(tspr->x+spriteext[tspr->owner].mdposition_offset.x-globalposx))*  (1.f/1024.f) + a0.y)*f;
     m0.x *=-f; m1.x *=-f; a0.x = ((k1     -fglobalposy) * -(1.f/1024.f) + a0.x)*-f;
     m0.z *= g; m1.z *= g; a0.z = ((k0     -fglobalposz) * -(1.f/16384.f) + a0.z)*g;
 
@@ -2254,7 +2266,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
         if (alphahackarray[globalpicnum] != 0)
             al=alphahackarray[globalpicnum] * (1.f/255.f);
         glEnable(GL_BLEND);
-        glEnable(GL_ALPHA_TEST);
+        // glEnable(GL_ALPHA_TEST);
         glAlphaFunc(GL_GREATER,al);
     }
     else
@@ -2268,24 +2280,24 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
     //------------
 
     // PLAG: Cleaner model rotation code
-    if (sext->pitch || sext->roll)
+    if (sext->mdpitch || sext->mdroll)
     {
         float f = 1.f/((fxdimen * fviewingrange) * (256.f/(65536.f*128.f)) * (m0.x+m1.x));
         Bmemset(&a0, 0, sizeof(a0));
 
-        if (sext->pivot_offset.x)
-            a0.x = (float) sext->pivot_offset.x * f;
+        if (sext->mdpivot_offset.x)
+            a0.x = (float) sext->mdpivot_offset.x * f;
 
-        if (sext->pivot_offset.y)  // Compare with SCREEN_FACTORS above
-            a0.y = (float) sext->pivot_offset.y * f;
+        if (sext->mdpivot_offset.y)  // Compare with SCREEN_FACTORS above
+            a0.y = (float) sext->mdpivot_offset.y * f;
 
-        if ((sext->pivot_offset.z) && !(tspr->clipdist & TSPR_FLAGS_MDHACK))  // Compare with SCREEN_FACTORS above
-            a0.z = (float)sext->pivot_offset.z / (gxyaspect * fxdimen * (65536.f/128.f) * (m0.z+m1.z));
+        if ((sext->mdpivot_offset.z) && !(tspr->clipdist & TSPR_FLAGS_MDHACK))  // Compare with SCREEN_FACTORS above
+            a0.z = (float)sext->mdpivot_offset.z / (gxyaspect * fxdimen * (65536.f/128.f) * (m0.z+m1.z));
 
-        k0 = (float)sintable[(sext->pitch+512)&2047] * (1.f/16384.f);
-        k1 = (float)sintable[sext->pitch&2047] * (1.f/16384.f);
-        k2 = (float)sintable[(sext->roll+512)&2047] * (1.f/16384.f);
-        k3 = (float)sintable[sext->roll&2047] * (1.f/16384.f);
+        k0 = (float)sintable[(sext->mdpitch+512)&2047] * (1.f/16384.f);
+        k1 = (float)sintable[sext->mdpitch&2047] * (1.f/16384.f);
+        k2 = (float)sintable[(sext->mdroll+512)&2047] * (1.f/16384.f);
+        k3 = (float)sintable[sext->mdroll&2047] * (1.f/16384.f);
     }
 
     float const xpanning = (float)sext->xpanning * (1.f/256.f);
@@ -2323,7 +2335,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
         }
 #endif
 
-        if (sext->pitch || sext->roll)
+        if (sext->mdpitch || sext->mdroll)
         {
             vec3f_t fp1, fp2;
 
@@ -2389,7 +2401,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
         if (!i)
             continue;
         //i = mdloadskin((md2model *)m,tile2model[Ptile2tile(tspr->picnum,lpal)].skinnum,surfi); //hack for testing multiple surfaces per MD3
-        glBindTexture(GL_TEXTURE_2D, i);
+        polymost_bindTexture(GL_TEXTURE_2D, i);
 
         glMatrixMode(GL_TEXTURE);
         glLoadIdentity();
@@ -2555,7 +2567,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
                 glDisable(GL_TEXTURE_2D);
                 glDisableClientState(GL_TEXTURE_COORD_ARRAY);
                 glClientActiveTexture(texunits - 1);
-                glActiveTexture(--texunits);
+                polymost_activeTexture(--texunits);
             }
 #else
             glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -2576,7 +2588,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
                 glMatrixMode(GL_MODELVIEW);
                 glTexEnvf(GL_TEXTURE_ENV, GL_RGB_SCALE, 1.0f);
                 glDisable(GL_TEXTURE_2D);
-                glActiveTexture(--texunits);
+                polymost_activeTexture(--texunits);
             }
         } // r_vertexarrays
 
@@ -2586,7 +2598,7 @@ static int32_t polymost_md3draw(md3model_t *m, tspriteptr_t tspr)
     }
     //------------
 
-    if (m->usesalpha) glDisable(GL_ALPHA_TEST);
+    // if (m->usesalpha) glDisable(GL_ALPHA_TEST);
 
     glDisable(GL_CULL_FACE);
 //    glPopAttrib();

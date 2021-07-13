@@ -67,6 +67,7 @@ void faketimerhandler(void) { ; }
 static void Net_Disconnect(void);
 static void Net_HandleClientPackets(void);
 static void Net_HandleServerPackets(void);
+static void Net_AllocatePacketBuffer(void);
 #endif
 
 void Net_GetPackets(void)
@@ -74,6 +75,8 @@ void Net_GetPackets(void)
 #ifndef NETCODE_DISABLE
     if (g_netServer == NULL && g_netClient == NULL)
         return;
+
+    Net_AllocatePacketBuffer();
 
     if (g_netDisconnect)
     {
@@ -192,8 +195,8 @@ static const int32_t cNetSprite_DeletedSpriteStat = STAT_NETALLOC;
 //
 //      every time the client gets a new snapshot, this entire list will be deleted
 
-static int32_t headscratchpadsprite = -1;
-static int32_t nextscratchpadsprite[MAXSPRITES];
+static int16_t headscratchpadsprite = -1;
+static int16_t nextscratchpadsprite[MAXSPRITES];
 
 
 static char    recbuf[180];
@@ -312,20 +315,6 @@ static netField_t ActorFields[] =
     { ACTF(t_data_8),                   32 },
     { ACTF(t_data_9),                   32 },
 
-#ifdef LUNATIC
-    // need to update this section if LUNATIC is ever brought back in
-    { ACTF(hvel),               16 },
-    { ACTF(vvel),               16 },
-
-
-    { ACTF(startframe),         16 },
-    { ACTF(numframes),          16 },
-
-    { ACTF(viewtype),           16 },
-    { ACTF(incval),             16 },
-    { ACTF(delay),              16 },
-#endif
-
     { ACTF(flags),                      32 },
 
     { ACTF(bpos_x),                     32 },
@@ -350,10 +339,6 @@ static netField_t ActorFields[] =
 
     { ACTF(stayput),            16 },
     { ACTF(dispicnum),          16 },
-
-#if defined LUNATIC
-    { ACTF(movflags),           16 },
-#endif
 
     { ACTF(cgg),            8},
 
@@ -452,14 +437,14 @@ static uint32_t g_netMapRevisionNumber = 0;
 // what version of the game the client has interpolated to.
 static uint32_t g_cl_InterpolatedRevision = 0;
 
-static netmapstate_t g_mapStartState;
+static netmapstate_t *g_mapStartState;
 
-static netmapstate_t g_cl_InterpolatedMapStateHistory[NET_REVISIONS];
+static netmapstate_t *g_cl_InterpolatedMapStateHistory[NET_REVISIONS];
 
 // note that the map state number is not an index into here,
 // to get the index into this array out of a map state number, do <Map state number> % NET_REVISONS
-static netmapstate_t g_mapStateHistory[NET_REVISIONS];
-static uint8_t       tempnetbuf[MAX_WORLDBUFFER];
+static netmapstate_t *g_mapStateHistory[NET_REVISIONS];
+static uint8_t       *tempnetbuf;
 
 // Remember that this constant needs to be one bit longer than a struct index, so it can't be mistaken for a valid wall, sprite, or sector index
 static const int32_t cSTOP_PARSING_CODE = ((1 << NETINDEX_BITS) - 1);
@@ -476,6 +461,13 @@ bool        g_enableClientInterpolationCheck = true;
 // Internal functions
 static void Net_ReadWorldUpdate(uint8_t *packetData, int32_t packetSize);
 
+static void Net_AllocatePacketBuffer(void)
+{
+    if (tempnetbuf != nullptr)
+        return;
+
+    tempnetbuf = (uint8_t *)Xmalloc(MAX_WORLDBUFFER);
+}
 
 //Adds a sprite with index 'spriteIndex' to the netcode's internal scratch sprite list,
 //this does NOT allocate a new sprite or insert it into the other arrays.
@@ -915,7 +907,7 @@ static void Net_CopyActorFromNet(const netactor_t* netActor, actor_t *gameActor)
     bool isActor = G_TileHasActor(netActor->spr_picnum);
 
     // Fixes ambient sound infinite sound replay glitch (stand in the outdoor area of E1L1, the "airplane noise" will get very loud and loop endlessly.
-    bool isSoundActor = (DYNAMICTILEMAP(netActor->picnum) == MUSICANDSFX);
+    bool isSoundActor = (tileGetMapping(netActor->picnum) == MUSICANDSFX);
 
     if(!isSoundActor)
     {
@@ -929,7 +921,7 @@ static void Net_CopyActorFromNet(const netactor_t* netActor, actor_t *gameActor)
     // Prevents:
     // - Rotating sector stuttering
     // - Trains running backwards
-    bool isSyncedSE =   (DYNAMICTILEMAP(netActor->picnum) == SECTOREFFECTOR) &&
+    bool isSyncedSE =   (tileGetMapping(netActor->picnum) == SECTOREFFECTOR) &&
                         (
                                 (netActor->spr_lotag == SE_0_ROTATING_SECTOR)
                             ||  (netActor->spr_lotag == SE_1_PIVOT)
@@ -958,21 +950,6 @@ static void Net_CopyActorFromNet(const netactor_t* netActor, actor_t *gameActor)
     gameActor->t_data[8] = netActor->t_data_8;
     gameActor->t_data[9] = netActor->t_data_9;
 
-#ifdef LUNATIC
-
-    gameActor->mv.hvel = netActor->hvel;
-    gameActor->mv.vvel = netActor->vvel;
-
-    gameActor->ac.startframe = netActor->startframe;
-    gameActor->ac.numframes = netActor->numframes;
-    gameActor->ac.viewtype = netActor->viewtype;
-    gameActor->ac.incval = netActor->incval;
-    gameActor->ac.delay = netActor->delay;
-
-    gameActor->actiontics = netActor->actiontics;
-
-#endif
-
     gameActor->flags = netActor->flags;
 
     gameActor->bpos.x = netActor->bpos_x;
@@ -999,13 +976,6 @@ static void Net_CopyActorFromNet(const netactor_t* netActor, actor_t *gameActor)
     gameActor->stayput = netActor->stayput;
     gameActor->dispicnum = netActor->dispicnum;
 
-#if defined LUNATIC
-
-    //WARNING: NOT the same as movflag
-    gameActor->movflags = netActor->movflags;
-
-#endif
-
     gameActor->cgg = netActor->cgg;
 }
 
@@ -1017,17 +987,17 @@ static void Net_CopySpriteExtFromNet(const netactor_t* netActor, spriteext_t* ga
     gameSprExt->mdanimtims = netActor->ext_mdanimtims;
 
     gameSprExt->mdanimcur = netActor->ext_mdanimcur;
-    gameSprExt->angoff = netActor->ext_angoff;
-    gameSprExt->pitch = netActor->ext_pitch;
-    gameSprExt->roll = netActor->ext_roll;
+    gameSprExt->mdangoff = netActor->ext_angoff;
+    gameSprExt->mdpitch = netActor->ext_pitch;
+    gameSprExt->mdroll = netActor->ext_roll;
 
-    gameSprExt->pivot_offset.x = netActor->ext_pivot_offset_x;
-    gameSprExt->pivot_offset.y = netActor->ext_pivot_offset_y;
-    gameSprExt->pivot_offset.z = netActor->ext_pivot_offset_z;
+    gameSprExt->mdpivot_offset.x = netActor->ext_pivot_offset_x;
+    gameSprExt->mdpivot_offset.y = netActor->ext_pivot_offset_y;
+    gameSprExt->mdpivot_offset.z = netActor->ext_pivot_offset_z;
 
-    gameSprExt->position_offset.x = netActor->ext_position_offset_x;
-    gameSprExt->position_offset.y = netActor->ext_position_offset_y;
-    gameSprExt->position_offset.z = netActor->ext_position_offset_z;
+    gameSprExt->mdposition_offset.x = netActor->ext_position_offset_x;
+    gameSprExt->mdposition_offset.y = netActor->ext_position_offset_y;
+    gameSprExt->mdposition_offset.z = netActor->ext_position_offset_z;
 
     gameSprExt->flags = netActor->ext_flags;
     gameSprExt->xpanning = netActor->ext_xpanning;
@@ -1318,21 +1288,6 @@ static void Net_CopyActorToNet(const actor_t* gameActor, netactor_t *netActor)
     netActor->t_data_8 = gameActor->t_data[8];
     netActor->t_data_9 = gameActor->t_data[9];
 
-#ifdef LUNATIC
-
-    netActor->hvel = gameActor->mv.hvel;
-    netActor->vvel = gameActor->mv.vvel;
-
-    netActor->startframe = gameActor->ac.startframe;
-    netActor->numframes = gameActor->ac.numframes;
-    netActor->viewtype = gameActor->ac.viewtype;
-    netActor->incval = gameActor->ac.incval;
-    netActor->delay = gameActor->ac.delay;
-
-    netActor->actiontics = gameActor->actiontics;
-
-#endif
-
     netActor->flags = gameActor->flags;
 
     netActor->bpos_x = gameActor->bpos.x;
@@ -1359,12 +1314,6 @@ static void Net_CopyActorToNet(const actor_t* gameActor, netactor_t *netActor)
     netActor->stayput = gameActor->stayput;
     netActor->dispicnum = gameActor->dispicnum;
 
-#if defined LUNATIC
-    //WARNING: NOT the same as movflag
-    netActor->movflags = gameActor->movflags;
-
-#endif
-
     netActor->cgg = gameActor->cgg;
 }
 
@@ -1376,17 +1325,17 @@ static void Net_CopySpriteExtToNet(const spriteext_t* gameSpriteExt, netactor_t*
     netActor->ext_mdanimtims = gameSpriteExt->mdanimtims;
 
     netActor->ext_mdanimcur = gameSpriteExt->mdanimcur;
-    netActor->ext_angoff = gameSpriteExt->angoff;
-    netActor->ext_pitch = gameSpriteExt->pitch;
-    netActor->ext_roll = gameSpriteExt->roll;
+    netActor->ext_angoff = gameSpriteExt->mdangoff;
+    netActor->ext_pitch = gameSpriteExt->mdpitch;
+    netActor->ext_roll = gameSpriteExt->mdroll;
 
-    netActor->ext_pivot_offset_x = gameSpriteExt->pivot_offset.x;
-    netActor->ext_pivot_offset_y = gameSpriteExt->pivot_offset.y;
-    netActor->ext_pivot_offset_z = gameSpriteExt->pivot_offset.z;
+    netActor->ext_pivot_offset_x = gameSpriteExt->mdpivot_offset.x;
+    netActor->ext_pivot_offset_y = gameSpriteExt->mdpivot_offset.y;
+    netActor->ext_pivot_offset_z = gameSpriteExt->mdpivot_offset.z;
 
-    netActor->ext_position_offset_x = gameSpriteExt->position_offset.x;
-    netActor->ext_position_offset_y = gameSpriteExt->position_offset.y;
-    netActor->ext_position_offset_z = gameSpriteExt->position_offset.z;
+    netActor->ext_position_offset_x = gameSpriteExt->mdposition_offset.x;
+    netActor->ext_position_offset_y = gameSpriteExt->mdposition_offset.y;
+    netActor->ext_position_offset_z = gameSpriteExt->mdposition_offset.z;
 
     netActor->ext_flags = gameSpriteExt->flags;
     netActor->ext_xpanning = gameSpriteExt->xpanning;
@@ -2391,13 +2340,7 @@ static void Net_ReceiveNewPlayer(uint8_t *pbuf, int32_t packbufleng)
         g_player[pbuf[4]].playerquitflag = 1;
 
         if (!g_player[pbuf[4]].ps)
-        {
             g_player[pbuf[4]].ps = (DukePlayer_t *)Xcalloc(1, sizeof(DukePlayer_t));
-        }
-        if (!g_player[pbuf[4]].input)
-        {
-            g_player[pbuf[4]].input = (input_t *)Xcalloc(1, sizeof(input_t));
-        }
     }
 
     if (pbuf[5] == NET_DEDICATED_SERVER)
@@ -2597,6 +2540,8 @@ static void Net_FillPlayerUpdate(playerupdate_t *update, int32_t player)
 // set all actors, walls, and sectors in a snapshot to their Null states.
 static void Net_InitMapState(netmapstate_t* mapState)
 {
+    Bassert(mapState != nullptr);
+
     netactor_t  sprDefault = cNullNetActor;
 
     int32_t     index = 0;
@@ -3379,6 +3324,9 @@ static void NetBuffer_WriteDeltaNetActor(NetBuffer_t* netBuffer, const netactor_
 
 static void Net_WriteNetActorsToBuffer(NetBuffer_t* netBuffer, const netmapstate_t* from, const netmapstate_t* to)
 {
+    Bassert(from != nullptr);
+    Bassert(to != nullptr);
+
     const netactor_t* fromActor = NULL;
 
     const netactor_t* toActor = NULL;
@@ -3443,6 +3391,9 @@ static void Net_WriteNetActorsToBuffer(NetBuffer_t* netBuffer, const netmapstate
 
 static void Net_WriteWorldToBuffer(NetBuffer_t* netBuffer, const netmapstate_t* fromSnapshot, const netmapstate_t* toSnapshot)
 {
+    Bassert(fromSnapshot != nullptr);
+    Bassert(toSnapshot != nullptr);
+
     int32_t index = 0;
 
     for (index = 0; index < numwalls; index++)
@@ -3822,6 +3773,8 @@ static void NetBuffer_ReadDeltaActor(NetBuffer_t* netBuffer, const netactor_t *f
 // oldSnapshot to make newSnapshot.
 static void Net_ParseWalls(NetBuffer_t *netBuffer, netmapstate_t *oldSnapshot, netmapstate_t *newSnapshot)
 {
+    Bassert(oldSnapshot != nullptr);
+    Bassert(newSnapshot != nullptr);
 
     int32_t         newSnapshotNetIndex = 0;
     int32_t         oldSnapshotNetIndex = 0;
@@ -3938,6 +3891,8 @@ static void Net_ParseWalls(NetBuffer_t *netBuffer, netmapstate_t *oldSnapshot, n
 
 static void Net_ParseSectors(NetBuffer_t *netBuffer, netmapstate_t *oldSnapshot, netmapstate_t *newSnapshot)
 {
+    Bassert(oldSnapshot != nullptr);
+    Bassert(newSnapshot != nullptr);
 
     int32_t         newSnapshotNetIndex = 0;
     int32_t         oldSnapshotNetIndex = 0;
@@ -4061,6 +4016,8 @@ static void Net_ParseSectors(NetBuffer_t *netBuffer, netmapstate_t *oldSnapshot,
 
 static void Net_ParseActors(NetBuffer_t *netBuffer, const netmapstate_t* oldSnapshot, netmapstate_t* newSnapshot)
 {
+    Bassert(oldSnapshot != nullptr);
+    Bassert(newSnapshot != nullptr);
 
     // FROM PACKET: index into sprite[] (game arrays)
     int32_t         newActorIndex = 0;
@@ -4196,6 +4153,9 @@ static void Net_ParseActors(NetBuffer_t *netBuffer, const netmapstate_t* oldSnap
 
 static void NetBuffer_ReadWorldSnapshotFromBuffer(NetBuffer_t* netBuffer, netmapstate_t* oldSnapshot, netmapstate_t* newSnapshot)
 {
+    Bassert(oldSnapshot != nullptr);
+    Bassert(newSnapshot != nullptr);
+
     // note that the order these functions are called should match the order that these structs are written to
     // by the server
     Net_ParseWalls(netBuffer, oldSnapshot, newSnapshot);
@@ -4211,7 +4171,7 @@ static void Net_SendWorldUpdate(uint32_t fromRevisionNumber, uint32_t toRevision
         return;
     }
 
-    Bassert(MAX_WORLDBUFFER == ARRAY_SIZE(tempnetbuf));
+    Bassert(tempnetbuf != nullptr);
     Bassert(NET_REVISIONS == ARRAY_SIZE(g_mapStateHistory));
 
     uint32_t        playerRevisionIsTooOld = (toRevisionNumber - fromRevisionNumber) > NET_REVISIONS;
@@ -4231,8 +4191,10 @@ static void Net_SendWorldUpdate(uint32_t fromRevisionNumber, uint32_t toRevision
 
     uint32_t        fromRevisionNumberToSend = 0x86753090;
 
-    netmapstate_t*  toMapState = &g_mapStateHistory[toRevisionNumber % NET_REVISIONS];
+    netmapstate_t*  toMapState = g_mapStateHistory[toRevisionNumber % NET_REVISIONS];
     netmapstate_t*  fromMapState = NULL;
+
+    Bassert(toMapState != nullptr);
 
     NET_75_CHECK++; // during the rollover state it might be a good idea to init the map state history?
                     // maybe not? I do init map states before using them, so it might not be needed.
@@ -4240,17 +4202,18 @@ static void Net_SendWorldUpdate(uint32_t fromRevisionNumber, uint32_t toRevision
 
     if (playerRevisionIsTooOld || revisionInRolloverState)
     {
-        fromMapState = &g_mapStartState;
+        fromMapState = g_mapStartState;
         fromRevisionNumberToSend = cInitialMapStateRevisionNumber;
     }
     else
     {
         uint32_t tFromRevisionIndex = fromRevisionNumber % NET_REVISIONS;
 
-        fromMapState = &g_mapStateHistory[tFromRevisionIndex];
+        fromMapState = g_mapStateHistory[tFromRevisionIndex];
         fromRevisionNumberToSend = fromRevisionNumber;
     }
 
+    Bassert(fromMapState != nullptr);
 
     Bmemset(byteBuffer, 0, sizeof(tempnetbuf) - 1);
 
@@ -4282,6 +4245,9 @@ static void Net_SendWorldUpdate(uint32_t fromRevisionNumber, uint32_t toRevision
 
 static void Net_CopySnapshotToGameArrays(netmapstate_t* srv_snapshot, netmapstate_t* cl_snapshot)
 {
+    Bassert(srv_snapshot != nullptr);
+    Bassert(cl_snapshot != nullptr);
+
     int32_t index;
 
     // this isn't just copying the entries that "changed" into the game arrays,
@@ -4346,7 +4312,7 @@ static void Net_ReadWorldUpdate(uint8_t* packetData, int32_t packetSize)
     uint8_t*        dataStartAddr = packetData + 1;
 
     NET_DEBUG_VAR int16_t   DEBUG_NoMapLoaded               = ((numwalls < 1) || (numsectors < 1));
-    NET_DEBUG_VAR int32_t   DEBUG_InitialSnapshotNotSet     = (g_mapStartState.sector[0].wallnum <= 0);
+    NET_DEBUG_VAR int32_t   DEBUG_InitialSnapshotNotSet     = (g_mapStartState->sector[0].wallnum <= 0);
 
     if (!ClientPlayerReady)
     {
@@ -4385,7 +4351,7 @@ static void Net_ReadWorldUpdate(uint8_t* packetData, int32_t packetSize)
         // If a client's current revision is too old, the server will send them
         // a snapshot to update them from the initial state instead of the
         // client's last known state.
-        fromMapState = &g_mapStartState;
+        fromMapState = g_mapStartState;
     }
     else if (packetToRevisionNumber <= g_netMapRevisionNumber)
     {
@@ -4396,12 +4362,15 @@ static void Net_ReadWorldUpdate(uint8_t* packetData, int32_t packetSize)
     }
     else
     {
-        fromMapState = &g_mapStateHistory[packetFromRevisionNumber % NET_REVISIONS];
+        fromMapState = g_mapStateHistory[packetFromRevisionNumber % NET_REVISIONS];
     }
 
 
-    netmapstate_t* toMapState = &g_mapStateHistory[packetToRevisionNumber % NET_REVISIONS];
-    netmapstate_t* clMapState = &g_cl_InterpolatedMapStateHistory[packetToRevisionNumber % NET_REVISIONS];
+    netmapstate_t* toMapState = g_mapStateHistory[packetToRevisionNumber % NET_REVISIONS];
+    netmapstate_t* clMapState = g_cl_InterpolatedMapStateHistory[packetToRevisionNumber % NET_REVISIONS];
+
+    Bassert(toMapState != nullptr);
+    Bassert(clMapState != nullptr);
 
     toMapState->revisionNumber = packetToRevisionNumber;
 
@@ -4596,7 +4565,9 @@ void Net_StoreClientState(void)
 
     g_cl_InterpolatedRevision = Net_GetNextRevisionNumber(g_cl_InterpolatedRevision);
 
-    netmapstate_t* currentMapState = &g_cl_InterpolatedMapStateHistory[g_cl_InterpolatedRevision % NET_REVISIONS];
+    netmapstate_t* currentMapState = g_cl_InterpolatedMapStateHistory[g_cl_InterpolatedRevision % NET_REVISIONS];
+
+    Bassert(currentMapState != nullptr);
 
     Net_InitMapState(currentMapState);
     Net_AddWorldToSnapshot(currentMapState);
@@ -4614,7 +4585,9 @@ void Net_SendMapUpdate(void)
 
     g_netMapRevisionNumber = Net_GetNextRevisionNumber(g_netMapRevisionNumber);
 
-    netmapstate_t* toMapState = &g_mapStateHistory[g_netMapRevisionNumber % NET_REVISIONS];
+    netmapstate_t* toMapState = g_mapStateHistory[g_netMapRevisionNumber % NET_REVISIONS];
+
+    Bassert(toMapState != nullptr);
 
     Net_InitMapState(toMapState);
     Net_AddWorldToSnapshot(toMapState);
@@ -4657,9 +4630,10 @@ void DumpMapStateHistory()
     // write the null map state (it should never, ever be changed, but just for completeness sake
     // fwrite(&NullMapState, sizeof(NullMapState), 1, mapStatesFile);
 
-    fwrite(&g_mapStartState, sizeof(g_mapStartState), 1, mapStatesFile);
+    fwrite(g_mapStartState, sizeof(g_mapStartState), 1, mapStatesFile);
 
-    fwrite(&g_mapStateHistory[0], sizeof(g_mapStateHistory), 1, mapStatesFile);
+    for (int mapStateIndex = 0; mapStateIndex < NET_REVISIONS; mapStateIndex++)
+        fwrite(g_mapStateHistory[mapStateIndex], sizeof(netmapstate_t), 1, mapStatesFile);
 
     OSD_Printf("Dumped map states to %s.\n", fileName);
 
@@ -4753,6 +4727,7 @@ void Net_Connect(const char *srvaddr)
     if (g_netClient == NULL)
     {
         initprintf("An error occurred while trying to create an ENet client host.\n");
+        Xfree(oursrvaddr);
         return;
     }
 
@@ -4766,6 +4741,7 @@ void Net_Connect(const char *srvaddr)
     if (g_netClientPeer == NULL)
     {
         initprintf("No available peers for initiating an ENet connection.\n");
+        Xfree(oursrvaddr);
         return;
     }
 
@@ -4775,6 +4751,7 @@ void Net_Connect(const char *srvaddr)
         if (enet_host_service(g_netClient, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT)
         {
             initprintf("Connection to %s:%d succeeded.\n", oursrvaddr, address.port);
+            Net_AllocatePacketBuffer();
             Xfree(oursrvaddr);
             return;
         }
@@ -4799,7 +4776,7 @@ void Net_Connect(const char *srvaddr)
 ///</summary>
 void Net_AddWorldToInitialSnapshot()
 {
-    Net_AddWorldToSnapshot(&g_mapStartState);
+    Net_AddWorldToSnapshot(g_mapStartState);
 }
 
 void Net_SendClientInfo(void)
@@ -5176,17 +5153,26 @@ void Net_InitMapStateHistory()
 
     for (mapStateIndex = 0; mapStateIndex < NET_REVISIONS; mapStateIndex++)
     {
-        netmapstate_t *mapState = &g_mapStateHistory[mapStateIndex];
-        netmapstate_t *clState  = &g_cl_InterpolatedMapStateHistory[mapStateIndex];
+        if (g_mapStateHistory[mapStateIndex] == nullptr)
+            g_mapStateHistory[mapStateIndex] = (netmapstate_t *)Xcalloc(1, sizeof(netmapstate_t));
 
+        netmapstate_t *mapState = g_mapStateHistory[mapStateIndex];
+
+        if (g_cl_InterpolatedMapStateHistory[mapStateIndex] == nullptr)
+            g_cl_InterpolatedMapStateHistory[mapStateIndex] = (netmapstate_t *)Xcalloc(1, sizeof(netmapstate_t));
+
+        netmapstate_t *clState  = g_cl_InterpolatedMapStateHistory[mapStateIndex];
 
         Net_InitMapState(mapState);
         Net_InitMapState(clState);
     }
 
-    Net_InitMapState(&g_mapStartState);
+    if (g_mapStartState == nullptr)
+        g_mapStartState = (netmapstate_t *)Xcalloc(1, sizeof(netmapstate_t));
 
-    g_mapStartState.revisionNumber = cInitialMapStateRevisionNumber;
+    Net_InitMapState(g_mapStartState);
+
+    g_mapStartState->revisionNumber = cInitialMapStateRevisionNumber;
 
     g_netMapRevisionNumber    = cInitialMapStateRevisionNumber;  // Net_InitMapStateHistory()
     g_cl_InterpolatedRevision = cInitialMapStateRevisionNumber;

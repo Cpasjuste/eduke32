@@ -127,6 +127,7 @@ enum scripttoken_t
     T_NEWGAMECHOICES,
     T_LOCALIZATION, T_STRING,
     T_TILEFONT, T_CHARACTER,
+    T_TRUENPOT,
 };
 
 static int32_t lastmodelid = -1, lastvoxid = -1, modelskin = -1, lastmodelskin = -1, seenframe = 0;
@@ -265,8 +266,10 @@ static int32_t Defs_ImportTileFromTexture(char const * const fn, int32_t const t
         if (artstatus < 0)
             return artstatus<<8;
 
-        Bmemcpy(&picanm[tile], &kpzbuf[20], sizeof(picanm_t));
-        tileConvertAnimFormat(tile);
+        uint32_t picanmdisk;
+        Bmemcpy(&picanmdisk, &kpzbuf[20], sizeof(uint32_t));
+        picanmdisk = B_LITTLE32(picanmdisk);
+        tileConvertAnimFormat(tile, picanmdisk);
 
         int32_t const xsiz = B_LITTLE16(B_UNBUF16(&kpzbuf[16]));
         int32_t const ysiz = B_LITTLE16(B_UNBUF16(&kpzbuf[18]));
@@ -809,6 +812,7 @@ static int32_t defsparser(scriptfile *script)
             vec2_t  tile_size{};
             uint8_t have_crc32 = 0;
             uint8_t have_size = 0;
+            uint8_t tile_flags = 0;
 
             static const tokenlist tilefromtexturetokens[] =
             {
@@ -824,6 +828,7 @@ static int32_t defsparser(scriptfile *script)
                 { "texture",         T_TEXTURE },
                 { "ifcrc",           T_IFCRC },
                 { "ifmatch",         T_IFMATCH },
+                { "truenpot",        T_TRUENPOT },
             };
 
             if (scriptfile_getsymbol(script,&tile)) break;
@@ -891,6 +896,9 @@ static int32_t defsparser(scriptfile *script)
                 case T_NOFULLBRIGHT:
                     flags |= PICANM_NOFULLBRIGHT_BIT;
                     break;
+                case T_TRUENPOT:
+                    tile_flags |= TILEFLAGS_TRUENPOT;
+                    break;
                 case T_TEXTURE:
                     istexture = 1;
                     break;
@@ -906,30 +914,44 @@ static int32_t defsparser(scriptfile *script)
                 break;
             }
 
+            int32_t orig_crc32{};
             if (have_crc32)
             {
-                int32_t const orig_crc32 = tileGetCRC32(tile);
-                if (orig_crc32 != tile_crc32)
-                {
-                    // initprintf("CRC32 of tile %d doesn't match! CRC32: %d, Expected: %d\n", tile, orig_crc32, tile_crc32);
-                    break;
-                }
+                orig_crc32 = tileGetCRC32(tile);
+                if (orig_crc32 == tile_crc32)
+                    have_crc32 = 0;
+#if 0
+                else
+                    initprintf("CRC32 of tile %d doesn't match! CRC32: %d, Expected: %d\n", tile, orig_crc32, tile_crc32);
+#endif
             }
 
+            vec2_16_t orig_size{};
             if (have_size)
             {
-                vec2_16_t const orig_size = tileGetSize(tile);
-                if (orig_size.x != tile_size.x && orig_size.y != tile_size.y)
-                {
-                    // initprintf("Size of tile %d doesn't match! Size: (%d, %d), Expected: (%d, %d)\n", tile, orig_size.x, orig_size.y, tile_size.x, tile_size.y);
-                    break;
-                }
+                orig_size = tileGetSize(tile);
+                if (orig_size.x == tile_size.x && orig_size.y == tile_size.y)
+                    have_size = 0;
+#if 0
+                else
+                    initprintf("Size of tile %d doesn't match! Size: (%d, %d), Expected: (%d, %d)\n", tile, orig_size.x, orig_size.y, tile_size.x, tile_size.y);
+#endif
+            }
+
+            if (have_crc32 || have_size)
+            {
+#if 0
+                initprintf("tilefromtexture %d { ifmatch { size %d %d crc32 %d } }\n", tile, orig_size.x, orig_size.y, orig_crc32);
+#endif
+                break;
             }
 
             if (!fn)
             {
                 // tilefromtexture <tile> { texhitscan }  sets the bit but doesn't change tile data
                 picanm[tile].sf |= flags;
+                picanm[tile].tileflags |= tile_flags;
+
                 if (havexoffset)
                     picanm[tile].xofs = xoffset;
                 if (haveyoffset)
@@ -940,6 +962,8 @@ static int32_t defsparser(scriptfile *script)
                                script->filename, scriptfile_getlinum(script,texturetokptr));
                 break;
             }
+
+            picanm[tile].tileflags |= tile_flags; // Set flags before loading, since we may need them before uploading.
 
             int32_t const texstatus = Defs_ImportTileFromTexture(fn, tile, alphacut, istexture);
             if (texstatus == -3)
@@ -2100,7 +2124,7 @@ static int32_t defsparser(scriptfile *script)
                 filebuf = (char *)Xmalloc(filesize);
 
                 klseek(fd, 0, SEEK_SET);
-                if (kread(fd, filebuf, filesize)!=filesize)
+                if (kread_and_test(fd, filebuf, filesize))
                     { kclose(fd); Xfree(highpaldata); initprintf("Error: didn't read all of \"%s\".\n", fn); break; }
 
                 kclose(fd);

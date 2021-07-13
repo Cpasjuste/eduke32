@@ -63,6 +63,11 @@ void FX_InitCvars(void);
 int FX_Shutdown(void);
 int FX_GetDevice(void);
 
+/* returns true only after program startup */
+static FORCE_INLINE int FX_WarmedUp(void)
+{
+    return ASS_PCMSoundDriver != ASS_AutoDetect;
+}
 
 
 int FX_Play(char *ptr, uint32_t ptrlength, int loopstart, int loopend, int pitchoffset,
@@ -77,7 +82,10 @@ int FX_PlayLoopedRaw(char *ptr, uint32_t ptrlength, char *loopstart, char *loope
 int FX_StartDemandFeedPlayback(void (*function)(const char** ptr, uint32_t* length, void* userdata), int bitdepth, int channels, int rate, int pitchoffset,
     int vol, int left, int right, int priority, fix16_t volume, intptr_t callbackval, void* userdata);
 
-int FX_SetPrintf(void(*function)(const char *, ...));
+int FX_StartDemandFeedPlayback3D(void (*function)(const char** ptr, uint32_t* length, void* userdata), int bitdepth, int channels, int rate, int pitchoffset,
+    int angle, int distance, int priority, fix16_t volume, intptr_t callbackval, void* userdata);
+
+int FX_SetPrintf(int(*function)(const char *, ...));
 
 extern int FX_ErrorCode;
 extern int FX_MixRate;

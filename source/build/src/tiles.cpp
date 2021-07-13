@@ -31,9 +31,6 @@ static int32_t tilefileoffs[MAXTILES];
 static uint8_t *g_bakTileFileNum;
 static int32_t *g_bakTileFileOffs;
 static vec2_16_t *g_bakTileSiz;
-static char *g_bakPicSiz;
-static char *g_bakWalock;
-static intptr_t *g_bakWaloff;
 static picanm_t *g_bakPicAnm;
 static char * g_bakFakeTile;
 static char ** g_bakFakeTileData;
@@ -71,7 +68,9 @@ template <typename origar_t, typename bakar_t>
 static inline void RESTORE_MAPART_ARRAY(origar_t & origar, bakar_t & bakar)
 {
     EDUKE32_STATIC_ASSERT(sizeof(origar[0]) == sizeof(bakar[0]));
-    Bmemcpy(origar, bakar, ARRAY_SIZE(origar) * sizeof(origar[0]));
+    for (size_t i=0; i < ARRAY_SIZE(origar); i++)
+        if (tilefilenum[i] >= MAXARTFILES_BASE)
+            origar[i] = bakar[i];
     DO_FREE_AND_NULL(bakar);
 }
 
@@ -109,25 +108,28 @@ void artClearMapArt(void)
     }
 
     // Restore original per-tile arrays
-    RESTORE_MAPART_ARRAY(tilefilenum, g_bakTileFileNum);
     RESTORE_MAPART_ARRAY(tilefileoffs, g_bakTileFileOffs);
     RESTORE_MAPART_ARRAY(tilesiz, g_bakTileSiz);
-    RESTORE_MAPART_ARRAY(picsiz, g_bakPicSiz);
-    RESTORE_MAPART_ARRAY(walock, g_bakWalock);
-    RESTORE_MAPART_ARRAY(waloff, g_bakWaloff);
     RESTORE_MAPART_ARRAY(picanm, g_bakPicAnm);
-    RESTORE_MAPART_ARRAY(faketile, g_bakFakeTile);
     RESTORE_MAPART_ARRAY(rottile, g_bakRottile);
+
+    // restore entire faketile array as it can cause problems otherwise
+    EDUKE32_STATIC_ASSERT(sizeof(faketile[0]) == sizeof(g_bakFakeTile[0]));
+    Bmemcpy(faketile, g_bakFakeTile, ARRAY_SIZE(faketile) * sizeof(faketile[0]));
+    DO_FREE_AND_NULL(g_bakFakeTile);
 
     for (size_t i = 0; i < MAXUSERTILES; ++i)
     {
-        if (faketiledata[i] != g_bakFakeTileData[i])
+        if (tilefilenum[i] >= MAXARTFILES_BASE && faketiledata[i] != g_bakFakeTileData[i])
         {
-            free(faketiledata[i]);
+            Bfree(faketiledata[i]);
             faketiledata[i] = g_bakFakeTileData[i];
         }
     }
     DO_FREE_AND_NULL(g_bakFakeTileData);
+
+    // must be restored last
+    RESTORE_MAPART_ARRAY(tilefilenum, g_bakTileFileNum);
 
     artUpdateManifest();
 #ifdef USE_OPENGL
@@ -166,9 +168,6 @@ void artSetupMapArt(const char *filename)
     ALLOC_MAPART_ARRAY(tilefilenum, g_bakTileFileNum);
     ALLOC_MAPART_ARRAY(tilefileoffs, g_bakTileFileOffs);
     ALLOC_MAPART_ARRAY(tilesiz, g_bakTileSiz);
-    ALLOC_MAPART_ARRAY(picsiz, g_bakPicSiz);
-    ALLOC_MAPART_ARRAY(walock, g_bakWalock);
-    ALLOC_MAPART_ARRAY(waloff, g_bakWaloff);
     ALLOC_MAPART_ARRAY(picanm, g_bakPicAnm);
     ALLOC_MAPART_ARRAY(faketile, g_bakFakeTile);
     ALLOC_MAPART_ARRAY(faketiledata, g_bakFakeTileData);
@@ -225,7 +224,7 @@ static void tileSetDataSafe(int32_t const tile, int32_t tsiz, char const * const
     }
     else
     {
-        free(newtile);
+        Bfree(newtile);
     }
 }
 
@@ -395,20 +394,15 @@ int32_t artCheckUnitFileHeader(uint8_t const * const buf, int32_t length)
     return 0;
 }
 
-void tileConvertAnimFormat(int32_t const picnum)
+void tileConvertAnimFormat(int32_t const picnum, uint32_t const picanmdisk)
 {
-    EDUKE32_STATIC_ASSERT(sizeof(picanm_t) == 4);
     EDUKE32_STATIC_ASSERT(PICANM_ANIMTYPE_MASK == 192);
 
     picanm_t * const thispicanm = &picanm[picnum];
-
-    // Old on-disk format: anim type is in the 2 highest bits of the lowest byte.
-    thispicanm->sf &= ~192;
-    thispicanm->sf |= thispicanm->num&192;
-    thispicanm->num &= ~192;
-
-    // don't allow setting texhitscan/nofullbright from ART
-    thispicanm->sf &= ~PICANM_MISC_MASK;
+    thispicanm->num = picanmdisk&63;
+    thispicanm->xofs = (picanmdisk>>8)&255;
+    thispicanm->yofs = (picanmdisk>>16)&255;
+    thispicanm->sf = ((picanmdisk>>24)&15) | (picanmdisk&192);
 }
 
 void artReadManifest(buildvfs_kfd const fil, artheader_t const * const local)
@@ -417,14 +411,16 @@ void artReadManifest(buildvfs_kfd const fil, artheader_t const * const local)
     int16_t *tilesizy = (int16_t *) Xmalloc(local->numtiles * sizeof(int16_t));
     kread(fil, tilesizx, local->numtiles*sizeof(int16_t));
     kread(fil, tilesizy, local->numtiles*sizeof(int16_t));
-    kread(fil, &picanm[local->tilestart], local->numtiles*sizeof(picanm_t));
 
     for (bssize_t i=local->tilestart; i<=local->tileend; i++)
     {
         tilesiz[i].x = B_LITTLE16(tilesizx[i-local->tilestart]);
         tilesiz[i].y = B_LITTLE16(tilesizy[i-local->tilestart]);
 
-        tileConvertAnimFormat(i);
+        uint32_t picanmdisk;
+        kread(fil, &picanmdisk, sizeof(uint32_t));
+        picanmdisk = B_LITTLE32(picanmdisk);
+        tileConvertAnimFormat(i, picanmdisk);
     }
 
     DO_FREE_AND_NULL(tilesizx);

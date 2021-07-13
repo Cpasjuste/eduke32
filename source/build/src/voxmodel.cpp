@@ -53,7 +53,7 @@ uint32_t gloadtex_indexed(const int32_t *picbuf, int32_t xsiz, int32_t ysiz)
     uint32_t rtexid;
 
     glGenTextures(1, (GLuint *) &rtexid);
-    glBindTexture(GL_TEXTURE_2D, rtexid);
+    polymost_bindTexture(GL_TEXTURE_2D, rtexid);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -104,7 +104,7 @@ uint32_t gloadtex(const int32_t *picbuf, int32_t xsiz, int32_t ysiz, int32_t is8
     uint32_t rtexid;
 
     glGenTextures(1, (GLuint *) &rtexid);
-    glBindTexture(GL_TEXTURE_2D, rtexid);
+    polymost_bindTexture(GL_TEXTURE_2D, rtexid);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, 4, xsiz, ysiz, 0, GL_RGBA, GL_UNSIGNED_BYTE, (char *) pic2);
@@ -1015,11 +1015,9 @@ int32_t polymost_voxdraw(voxmodel_t *m, tspriteptr_t const tspr)
     k0 = m->bscale / 64.f;
     f = (float) tspr->xrepeat * (256.f/320.f) * k0;
     if ((sprite[tspr->owner].cstat&48)==16)
-    {
         f *= 1.25f;
-        a0.y -= tspr->xoffset*sintable[(spriteext[tspr->owner].angoff+512)&2047]*(1.f/(64.f*16384.f));
-        a0.x += tspr->xoffset*sintable[spriteext[tspr->owner].angoff&2047]*(1.f/(64.f*16384.f));
-    }
+    a0.y -= tspr->xoffset*sintable[(spriteext[tspr->owner].mdangoff+512)&2047]*(1.f/(64.f*16384.f));
+    a0.x += tspr->xoffset*sintable[spriteext[tspr->owner].mdangoff&2047]*(1.f/(64.f*16384.f));
 
     if (globalorientation&8) { m0.z = -m0.z; a0.z = -a0.z; } //y-flipping
     if (globalorientation&4) { m0.x = -m0.x; a0.x = -a0.x; a0.y = -a0.y; } //x-flipping
@@ -1029,7 +1027,7 @@ int32_t polymost_voxdraw(voxmodel_t *m, tspriteptr_t const tspr)
     f = (float) tspr->yrepeat * k0;
     m0.z *= f; a0.z *= f;
 
-    k0 = (float) (tspr->z+spriteext[tspr->owner].position_offset.z);
+    k0 = (float) (tspr->z+spriteext[tspr->owner].mdposition_offset.z);
     f = ((globalorientation&8) && (sprite[tspr->owner].cstat&48)!=0) ? -4.f : 4.f;
     k0 -= (tspr->yoffset*tspr->yrepeat)*f*m->bscale;
     zoff = m->siz.z*.5f;
@@ -1047,8 +1045,8 @@ int32_t polymost_voxdraw(voxmodel_t *m, tspriteptr_t const tspr)
 
     int const shadowHack = !!(tspr->clipdist & TSPR_FLAGS_MDHACK);
 
-    m0.y *= f; a0.y = (((float)(tspr->x+spriteext[tspr->owner].position_offset.x-globalposx)) * (1.f/1024.f) + a0.y) * f;
-    m0.x *=-f; a0.x = (((float)(tspr->y+spriteext[tspr->owner].position_offset.y-globalposy)) * -(1.f/1024.f) + a0.x) * -f;
+    m0.y *= f; a0.y = (((float)(tspr->x+spriteext[tspr->owner].mdposition_offset.x-globalposx)) * (1.f/1024.f) + a0.y) * f;
+    m0.x *=-f; a0.x = (((float)(tspr->y+spriteext[tspr->owner].mdposition_offset.y-globalposy)) * -(1.f/1024.f) + a0.x) * -f;
     m0.z *= g; a0.z = (((float)(k0     -globalposz - shadowHack)) * -(1.f/16384.f) + a0.z) * g;
 
     float mat[16];
@@ -1132,7 +1130,7 @@ int32_t polymost_voxdraw(voxmodel_t *m, tspriteptr_t const tspr)
         if (!m->texid8bit)
             m->texid8bit = gloadtex_indexed(m->mytex, m->mytexx, m->mytexy);
         else
-            glBindTexture(GL_TEXTURE_2D, m->texid8bit);
+            polymost_bindTexture(GL_TEXTURE_2D, m->texid8bit);
 
         int visShade = int(fabsf(((tspr->x-globalposx)*gcosang+(tspr->y-globalposy)*gsinang)*globvis2*(1.f/(64.f*1024.f*2.f))));
 
@@ -1152,7 +1150,7 @@ int32_t polymost_voxdraw(voxmodel_t *m, tspriteptr_t const tspr)
         if (!m->texid[globalpal])
             m->texid[globalpal] = gloadtex(m->mytex, m->mytexx, m->mytexy, m->is8bit, globalpal);
         else
-            glBindTexture(GL_TEXTURE_2D, m->texid[globalpal]);
+            polymost_bindTexture(GL_TEXTURE_2D, m->texid[globalpal]);
 
         polymost_usePaletteIndexing(false);
         polymost_setTexturePosSize({ 0.f, 0.f, 1.f, 1.f });

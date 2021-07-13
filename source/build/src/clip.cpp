@@ -11,12 +11,14 @@
 #include "baselayer.h"
 #include "clip.h"
 #include "engine_priv.h"
+#include "microprofile.h"
 
 static int16_t clipnum;
 static linetype clipit[MAXCLIPNUM];
-static int32_t clipsectnum, origclipsectnum, clipspritenum;
+static int32_t clipsectnum, origclipsectnum, layerclipsectnum, clipspritenum;
 int16_t clipsectorlist[MAXCLIPSECTORS];
 static int16_t origclipsectorlist[MAXCLIPSECTORS];
+static int16_t layerclipsectorlist[MAXCLIPSECTORS];
 static uint8_t clipsectormap[(MAXSECTORS+7)>>3];
 static uint8_t origclipsectormap[(MAXSECTORS+7)>>3];
 #ifdef HAVE_CLIPSHAPE_FEATURE
@@ -549,36 +551,6 @@ int32_t clipshape_idx_for_sprite(uspriteptr_t const curspr, int32_t curidx)
 
 int32_t clipmoveboxtracenum = 3;
 
-//
-// clipinsidebox
-//
-int clipinsidebox(vec2_t const * const vect, int const wallnum, int const walldist)
-{
-    int const r = walldist << 1;
-
-    auto const wal1 = (uwallptr_t)&wall[wallnum];
-    auto const wal2 = (uwallptr_t)&wall[wal1->point2];
-
-    vec2_t const v1 = { wal1->x + walldist - vect->x, wal1->y + walldist - vect->y };
-    vec2_t       v2 = { wal2->x + walldist - vect->x, wal2->y + walldist - vect->y };
-
-    if (((v1.x < 0) && (v2.x < 0)) || ((v1.y < 0) && (v2.y < 0)) || ((v1.x >= r) && (v2.x >= r)) || ((v1.y >= r) && (v2.y >= r)))
-        return 0;
-
-    v2.x -= v1.x; v2.y -= v1.y;
-
-    if (v2.x * (walldist - v1.y) >= v2.y * (walldist - v1.x))  // Front
-    {
-        v2.x *= ((v2.x > 0) ? (0 - v1.y) : (r - v1.y));
-        v2.y *= ((v2.y > 0) ? (r - v1.x) : (0 - v1.x));
-        return v2.x < v2.y;
-    }
-
-    v2.x *= ((v2.x > 0) ? (r - v1.y) : (0 - v1.y));
-    v2.y *= ((v2.y > 0) ? (0 - v1.x) : (r - v1.x));
-    return (v2.x >= v2.y) << 1;
-}
-
 
 //
 // clipinsideboxline
@@ -613,6 +585,18 @@ int clipinsideboxline(int x, int y, int x1, int y1, int x2, int y2, int walldist
     y2 *= ((y2 > 0) ? (0 - x1) : (r - x1));
     return (x2 >= y2) << 1;
 }
+
+
+//
+// clipinsidebox
+//
+int clipinsidebox(vec2_t const vect, int const wallnum, int const walldist)
+{
+    auto const wal1 = (uwallptr_t)&wall[wallnum];
+    auto const wal2 = (uwallptr_t)&wall[wal1->point2];
+    return clipinsideboxline(vect.x, vect.y, wal1->x, wal1->y, wal2->x, wal2->y, walldist);
+}
+
 
 static int32_t clipmove_warned;
 
@@ -734,7 +718,7 @@ int32_t clipsprite_initindex(int32_t curidx, uspriteptr_t const curspr, int32_t 
             {
                 wal->x *= flipx;
                 wal->y *= flipy;
-                rotatepoint(zerovec, wal->pos, rotang, &wal->pos);
+                rotatevec(wal->pos, rotang, &wal->pos);
             }
 
             wal->x += curspr->x;
@@ -754,7 +738,7 @@ int32_t clipsprite_initindex(int32_t curidx, uspriteptr_t const curspr, int32_t 
 
 #endif
 
-static void addclipline(int32_t dax1, int32_t day1, int32_t dax2, int32_t day2, int16_t daoval, int nofix)
+static void addclipline(int32_t dax1, int32_t day1, int32_t dax2, int32_t day2, int16_t daoval, int nofix = false)
 {
     if (clipnum >= MAXCLIPNUM)
     {
@@ -762,8 +746,7 @@ static void addclipline(int32_t dax1, int32_t day1, int32_t dax2, int32_t day2, 
         return;
     }
 
-    clipit[clipnum].x1 = dax1; clipit[clipnum].y1 = day1;
-    clipit[clipnum].x2 = dax2; clipit[clipnum].y2 = day2;
+    clipit[clipnum] = { { dax1, day1}, { dax2, day2 } };
     clipobjectval[clipnum] = daoval;
 
     uint32_t const mask = pow2char[clipnum&7];
@@ -825,7 +808,11 @@ static int cliptestsector(int const dasect, int const nextsect, int32_t const fl
         int32_t dacz2 = sec2->ceilingz;
 
         if ((sec2->floorstat|sec2->ceilingstat) & 2)
+#ifdef YAX_ENABLE
+            yax_getzsofslope(nextsect, pos.x, pos.y, &dacz2, &daz2);
+#else
             getcorrectzsofslope(nextsect, pos.x, pos.y, &dacz2, &daz2);
+#endif
 
         if (daz2 <= dacz2)
             return 1;
@@ -836,7 +823,11 @@ static int cliptestsector(int const dasect, int const nextsect, int32_t const fl
         int32_t dacz = sec->ceilingz;
 
         if ((sec->floorstat|sec->ceilingstat) & 2)
+#ifdef YAX_ENABLE
+            yax_getzsofslope(dasect, pos.x, pos.y, &dacz, &daz);
+#else
             getcorrectzsofslope(dasect, pos.x, pos.y, &dacz, &daz);
+#endif
 
         int32_t const sec2height = klabs(daz2-dacz2);
 
@@ -907,8 +898,8 @@ static inline int32_t cliptrace(vec2_t const pos, vec2_t * const goal)
 
     for (native_t z=clipnum-1; z>=0; z--)
     {
-        vec2_t const p1   = { clipit[z].x1, clipit[z].y1 };
-        vec2_t const p2   = { clipit[z].x2, clipit[z].y2 };
+        vec2_t const p1   = clipit[z].p1;
+        vec2_t const p2   = clipit[z].p2;
         vec2_t const area = { p2.x-p1.x, p2.y-p1.y };
 
         int32_t topu = area.x*(pos.y-p1.y) - (pos.x-p1.x)*area.y;
@@ -1012,19 +1003,25 @@ static void clipupdatesector(vec2_t const pos, int16_t * const sectnum, int wall
         return;
     }
 
-    if (inside_p(pos.x, pos.y, *sectnum))
+    if (inside(pos.x, pos.y, *sectnum) == 1)
         return;
 
     int16_t nsecs = min<int16_t>(getsectordist(pos, *sectnum), INT16_MAX);
 
     if (nsecs > (walldist + 8))
     {
+#ifdef DEBUGGINGAIDS
         OSD_Printf("%s(): initial position (%d, %d) not within initial sector %d; shortest distance %d.\n", EDUKE32_FUNCTION, pos.x, pos.y, *sectnum, nsecs);
+#endif
         walldist = 0x7fff;
     }
 
     static int16_t sectlist[MAXSECTORS];
     static uint8_t sectbitmap[(MAXSECTORS+7)>>3];
+    static uint8_t insidemap[(MAXSECTORS+7)>>3];
+
+    Bmemset(insidemap, 0, sizeof(insidemap));
+    bitmap_set(insidemap, *sectnum);
 
     bfirst_search_init(sectlist, sectbitmap, &nsecs, MAXSECTORS, *sectnum);
 
@@ -1032,8 +1029,10 @@ static void clipupdatesector(vec2_t const pos, int16_t * const sectnum, int wall
     {
         int const listsectnum = sectlist[sectcnt];
 
-        if (inside_p(pos.x, pos.y, listsectnum))
+        if (bitmap_test(insidemap, listsectnum) == 0 && inside(pos.x, pos.y, listsectnum) == 1)
             SET_AND_RETURN(*sectnum, listsectnum);
+
+        bitmap_set(insidemap, listsectnum);
 
         auto const sec       = &sector[listsectnum];
         int const  startwall = sec->wallptr;
@@ -1051,13 +1050,15 @@ static void clipupdatesector(vec2_t const pos, int16_t * const sectnum, int wall
     {
         int const listsectnum = sectlist[sectcnt];
 
-        if (inside_p(pos.x, pos.y, listsectnum))
+        if (bitmap_test(insidemap, listsectnum) == 0 && inside(pos.x, pos.y, listsectnum) == 1)
         {
             // add sector to clipping list so the next call to clipupdatesector()
             // finishes in the loop above this one
             addclipsect(listsectnum);
             SET_AND_RETURN(*sectnum, listsectnum);
         }
+
+        bitmap_set(insidemap, listsectnum);
 
         auto const sec       = &sector[listsectnum];
         int const  startwall = sec->wallptr;
@@ -1096,7 +1097,7 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
 
     //Extra walldist for sprites on sector lines
     vec2_t const  diff    = { goal.x - (pos->x), goal.y - (pos->y) };
-    int32_t const rad     = clip_nsqrtasm(compat_maybe_truncate_to_int32(uhypsq(diff.x, diff.y))) + MAXCLIPDIST + walldist + 8;
+    int32_t const rad     = ksqrt_inline(compat_maybe_truncate_to_int32(uhypsq(diff.x, diff.y))) + MAXCLIPDIST + walldist + 8;
     vec2_t const  clipMin = { cent.x - rad, cent.y - rad };
     vec2_t const  clipMax = { cent.x + rad, cent.y + rad };
 
@@ -1167,9 +1168,9 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
                 (wal->y < clipMin.y && wal2->y < clipMin.y) || (wal->y > clipMax.y && wal2->y > clipMax.y))
                 continue;
 
-            vec2_t p1 = wal->pos;
-            vec2_t p2 = wal2->pos;
-            vec2_t d  = { p2.x-p1.x, p2.y-p1.y };
+            vec2_t const p1 = wal->pos;
+            vec2_t const p2 = wal2->pos;
+            vec2_t const d  = { p2.x-p1.x, p2.y-p1.y };
 
             if (d.x * (pos->y-p1.y) < (pos->x-p1.x) * d.y)
                 continue;  //If wall's not facing you
@@ -1257,11 +1258,11 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
 
                 //Add 2 boxes at endpoints
                 int32_t bsz = walldist; if (diff.x < 0) bsz = -bsz;
-                addclipline(p1.x-bsz, p1.y-bsz, p1.x-bsz, p1.y+bsz, objtype, false);
-                addclipline(p2.x-bsz, p2.y-bsz, p2.x-bsz, p2.y+bsz, objtype, false);
+                addclipline(p1.x-bsz, p1.y-bsz, p1.x-bsz, p1.y+bsz, objtype);
+                addclipline(p2.x-bsz, p2.y-bsz, p2.x-bsz, p2.y+bsz, objtype);
                 bsz = walldist; if (diff.y < 0) bsz = -bsz;
-                addclipline(p1.x+bsz, p1.y-bsz, p1.x-bsz, p1.y-bsz, objtype, false);
-                addclipline(p2.x+bsz, p2.y-bsz, p2.x-bsz, p2.y-bsz, objtype, false);
+                addclipline(p1.x+bsz, p1.y-bsz, p1.x-bsz, p1.y-bsz, objtype);
+                addclipline(p2.x+bsz, p2.y-bsz, p2.x-bsz, p2.y-bsz, objtype);
 
                 v.x = walldist; if (d.y > 0) v.x = -v.x;
                 v.y = walldist; if (d.x < 0) v.y = -v.y;
@@ -1269,7 +1270,7 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
                 if (enginecompatibilitymode == ENGINE_EDUKE32 && d.x * (pos->y-p1.y-v.y) < (pos->x-p1.x-v.x) * d.y)
                     v.x >>= 1, v.y >>= 1;
 
-                addclipline(p1.x+v.x, p1.y+v.y, p2.x+v.x, p2.y+v.y, objtype, false);
+                addclipline(p1.x+v.x, p1.y+v.y, p2.x+v.x, p2.y+v.y, objtype);
             }
             else if (wal->nextsector>=0)
             {
@@ -1318,10 +1319,10 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
                     {
                         int32_t bsz = (spr->clipdist << 2)+walldist;
                         if (diff.x < 0) bsz = -bsz;
-                        addclipline(p1.x-bsz, p1.y-bsz, p1.x-bsz, p1.y+bsz, (int16_t)j+49152, false);
+                        addclipline(p1.x-bsz, p1.y-bsz, p1.x-bsz, p1.y+bsz, (int16_t)j+49152);
                         bsz = (spr->clipdist << 2)+walldist;
                         if (diff.y < 0) bsz = -bsz;
-                        addclipline(p1.x+bsz, p1.y-bsz, p1.x-bsz, p1.y-bsz, (int16_t)j+49152, false);
+                        addclipline(p1.x+bsz, p1.y-bsz, p1.x-bsz, p1.y-bsz, (int16_t)j+49152);
                     }
                 }
                 break;
@@ -1338,16 +1339,16 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
 
                     if (clipinsideboxline(cent.x, cent.y, p1.x, p1.y, p2.x, p2.y, rad) != 0)
                     {
-                        vec2_t v = { mulscale14(sintable[(spr->ang+256+512) & 2047], walldist),
-                                     mulscale14(sintable[(spr->ang+256) & 2047], walldist) };
+                        vec2_t const v = { mulscale14(sintable[(spr->ang+256+512) & 2047], walldist),
+                                           mulscale14(sintable[(spr->ang+256) & 2047], walldist) };
 
                         if ((p1.x-pos->x) * (p2.y-pos->y) >= (p2.x-pos->x) * (p1.y-pos->y))  // Front
-                            addclipline(p1.x+v.x, p1.y+v.y, p2.x+v.y, p2.y-v.x, (int16_t)j+49152, false);
+                            addclipline(p1.x+v.x, p1.y+v.y, p2.x+v.y, p2.y-v.x, (int16_t)j+49152);
                         else
                         {
                             if ((cstat & 64) != 0)
                                 continue;
-                            addclipline(p2.x-v.x, p2.y-v.y, p1.x-v.y, p1.y+v.x, (int16_t)j+49152, false);
+                            addclipline(p2.x-v.x, p2.y-v.y, p1.x-v.y, p1.y+v.x, (int16_t)j+49152);
                         }
 
                         //Side blocker
@@ -1371,32 +1372,32 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
                     rxi[0] = p1.x;
                     ryi[0] = p1.y;
 
-                    get_floorspr_points((uspriteptr_t) spr, 0, 0, &rxi[0], &rxi[1], &rxi[2], &rxi[3],
+                    get_floorspr_points(spr, 0, 0, &rxi[0], &rxi[1], &rxi[2], &rxi[3],
                         &ryi[0], &ryi[1], &ryi[2], &ryi[3], spriteGetSlope(j));
 
-                    vec2_t v = { mulscale14(sintable[(spr->ang-256+512)&2047], walldist),
-                                 mulscale14(sintable[(spr->ang-256)&2047], walldist) };
+                    vec2_t const v = { mulscale14(sintable[(spr->ang-256+512)&2047], walldist),
+                                       mulscale14(sintable[(spr->ang-256)&2047], walldist) };
 
                     if ((rxi[0]-pos->x) * (ryi[1]-pos->y) < (rxi[1]-pos->x) * (ryi[0]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[1], ryi[1], rxi[0], ryi[0], rad) != 0)
-                            addclipline(rxi[1]-v.y, ryi[1]+v.x, rxi[0]+v.x, ryi[0]+v.y, (int16_t)j+49152, false);
+                            addclipline(rxi[1]-v.y, ryi[1]+v.x, rxi[0]+v.x, ryi[0]+v.y, (int16_t)j+49152);
                     }
                     else if ((rxi[2]-pos->x) * (ryi[3]-pos->y) < (rxi[3]-pos->x) * (ryi[2]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[3], ryi[3], rxi[2], ryi[2], rad) != 0)
-                            addclipline(rxi[3]+v.y, ryi[3]-v.x, rxi[2]-v.x, ryi[2]-v.y, (int16_t)j+49152, false);
+                            addclipline(rxi[3]+v.y, ryi[3]-v.x, rxi[2]-v.x, ryi[2]-v.y, (int16_t)j+49152);
                     }
 
                     if ((rxi[1]-pos->x) * (ryi[2]-pos->y) < (rxi[2]-pos->x) * (ryi[1]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[2], ryi[2], rxi[1], ryi[1], rad) != 0)
-                            addclipline(rxi[2]-v.x, ryi[2]-v.y, rxi[1]-v.y, ryi[1]+v.x, (int16_t)j+49152, false);
+                            addclipline(rxi[2]-v.x, ryi[2]-v.y, rxi[1]-v.y, ryi[1]+v.x, (int16_t)j+49152);
                     }
                     else if ((rxi[3]-pos->x) * (ryi[0]-pos->y) < (rxi[0]-pos->x) * (ryi[3]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[0], ryi[0], rxi[3], ryi[3], rad) != 0)
-                            addclipline(rxi[0]+v.x, ryi[0]+v.y, rxi[3]+v.y, ryi[3]-v.x, (int16_t)j+49152, false);
+                            addclipline(rxi[0]+v.x, ryi[0]+v.y, rxi[3]+v.y, ryi[3]-v.x, (int16_t)j+49152);
                     }
                 }
                 break;
@@ -1416,32 +1417,32 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
                     rxi[0] = p1.x;
                     ryi[0] = p1.y;
 
-                    get_floorspr_points((uspriteptr_t) spr, 0, 0, &rxi[0], &rxi[1], &rxi[2], &rxi[3],
+                    get_floorspr_points(spr, 0, 0, &rxi[0], &rxi[1], &rxi[2], &rxi[3],
                         &ryi[0], &ryi[1], &ryi[2], &ryi[3], spriteGetSlope(j));
 
-                    vec2_t v = { mulscale14(sintable[(spr->ang-256+512)&2047], walldist),
-                                    mulscale14(sintable[(spr->ang-256)&2047], walldist) };
+                    vec2_t const v = { mulscale14(sintable[(spr->ang-256+512)&2047], walldist),
+                                       mulscale14(sintable[(spr->ang-256)&2047], walldist) };
 
                     if ((rxi[0]-pos->x) * (ryi[1]-pos->y) < (rxi[1]-pos->x) * (ryi[0]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[1], ryi[1], rxi[0], ryi[0], rad) != 0)
-                            addclipline(rxi[1]-v.y, ryi[1]+v.x, rxi[0]+v.x, ryi[0]+v.y, (int16_t)j+49152, false);
+                            addclipline(rxi[1]-v.y, ryi[1]+v.x, rxi[0]+v.x, ryi[0]+v.y, (int16_t)j+49152);
                     }
                     else if ((rxi[2]-pos->x) * (ryi[3]-pos->y) < (rxi[3]-pos->x) * (ryi[2]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[3], ryi[3], rxi[2], ryi[2], rad) != 0)
-                            addclipline(rxi[3]+v.y, ryi[3]-v.x, rxi[2]-v.x, ryi[2]-v.y, (int16_t)j+49152, false);
+                            addclipline(rxi[3]+v.y, ryi[3]-v.x, rxi[2]-v.x, ryi[2]-v.y, (int16_t)j+49152);
                     }
 
                     if ((rxi[1]-pos->x) * (ryi[2]-pos->y) < (rxi[2]-pos->x) * (ryi[1]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[2], ryi[2], rxi[1], ryi[1], rad) != 0)
-                            addclipline(rxi[2]-v.x, ryi[2]-v.y, rxi[1]-v.y, ryi[1]+v.x, (int16_t)j+49152, false);
+                            addclipline(rxi[2]-v.x, ryi[2]-v.y, rxi[1]-v.y, ryi[1]+v.x, (int16_t)j+49152);
                     }
                     else if ((rxi[3]-pos->x) * (ryi[0]-pos->y) < (rxi[0]-pos->x) * (ryi[3]-pos->y))
                     {
                         if (clipinsideboxline(cent.x, cent.y, rxi[0], ryi[0], rxi[3], ryi[3], rad) != 0)
-                            addclipline(rxi[0]+v.x, ryi[0]+v.y, rxi[3]+v.y, ryi[3]-v.x, (int16_t)j+49152, false);
+                            addclipline(rxi[0]+v.x, ryi[0]+v.y, rxi[3]+v.y, ryi[3]-v.x, (int16_t)j+49152);
                     }
                 }
                 if (heinum == 0)
@@ -1476,20 +1477,20 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
                     int32_t x2 = x1 - mulscale16(sinang, rspanx);
                     int32_t y2 = y1 + mulscale16(cosang, rspanx);
 
-                    vec2_t v = { mulscale14(sintable[(spr->ang-256+512)&2047], walldist),
-                                    mulscale14(sintable[(spr->ang-256)&2047], walldist) };
+                    vec2_t const v = { mulscale14(sintable[(spr->ang-256+512)&2047], walldist),
+                                       mulscale14(sintable[(spr->ang-256)&2047], walldist) };
 
                     if (clipinsideboxline(cent.x, cent.y, x1, y1, x2, y2, rad) != 0)
                     {
                         if ((x1-pos->x) * (y2-pos->y) >= (x2-pos->x) * (y1-pos->y))
                         {
-                            addclipline(x1+v.x, y1+v.y, x2+v.y, y2-v.x, (int16_t)j+49152, false);
+                            addclipline(x1+v.x, y1+v.y, x2+v.y, y2-v.x, (int16_t)j+49152);
                         }
                         else
                         {
                             if ((cstat & 64) != 0)
                                 continue;
-                            addclipline(x2-v.x, y2-v.y, x1-v.y, y1+v.x, (int16_t)j+49152, false);
+                            addclipline(x2-v.x, y2-v.y, x1-v.y, y1+v.x, (int16_t)j+49152);
                         }
                     }
                 }
@@ -1522,7 +1523,7 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
         {
             for (native_t i=clipnum-1;i>=0;--i)
             {
-                if (!bitmap_test(clipignore, i) && clipinsideboxline(pos->x, pos->y, clipit[i].x1, clipit[i].y1, clipit[i].x2, clipit[i].y2, walldist))
+                if (!bitmap_test(clipignore, i) && clipinsideboxline(pos->x, pos->y, clipit[i].x1, clipit[i].y1, clipit[i].x2, clipit[i].y2, walldist-1))
                 {
                     vec2_t const vec = pos->vec2;
                     keepaway(&pos->x, &pos->y, i);
@@ -1571,8 +1572,11 @@ int32_t clipmove(vec3_t * const pos, int16_t * const sectnum, int32_t xvect, int
 
                 if ((tempint ^ tempint2) < 0)
                 {
-                    if (enginecompatibilitymode == ENGINE_19961112)
+                    if (enginecompatibilitymode == ENGINE_EDUKE32)
+                        clipupdatesector(vec, sectnum, rad);
+                    else if (enginecompatibilitymode == ENGINE_19961112)
                         updatesector(pos->x, pos->y, sectnum);
+
                     return clipReturn;
                 }
             }
@@ -1724,7 +1728,7 @@ int pushmove(vec3_t *const vect, int16_t *const sectnum,
             int i;
 
             for (i=startwall, wal=(uwallptr_t)&wall[startwall]; i!=endwall; i+=dir, wal+=dir)
-                if (clipinsidebox(&vect->vec2, i, walldist-4) == 1)
+                if (clipinsidebox(vect->vec2, i, walldist-4) == 1)
                 {
                     int j = 0;
                     if (wal->nextsector < 0 || wal->cstat&dawalclipmask) j = 1;
@@ -1764,15 +1768,22 @@ int pushmove(vec3_t *const vect, int16_t *const sectnum,
                         int32_t dx = (sintable[(j+1024)&2047]>>11);
                         int32_t dy = (sintable[(j+512)&2047]>>11);
                         int bad2 = 16;
+                        vec2_t const ov = vect->vec2;
                         do
                         {
                             vect->x = (vect->x) + dx; vect->y = (vect->y) + dy;
                             bad2--; if (bad2 == 0) break;
-                        } while (clipinsidebox(&vect->vec2, i, walldist-4) != 0);
-                        bad = -1;
-                        k--; if (k <= 0) return bad;
+                        } while (clipinsidebox(vect->vec2, i, walldist-4) != 0);
+                        int16_t const os = *sectnum;
                         clipupdatesector(vect->vec2, sectnum, walldist);
-                        if (enginecompatibilitymode == ENGINE_EDUKE32 && *sectnum < 0) return -1;
+                        bad = -1;
+                        if (enginecompatibilitymode == ENGINE_EDUKE32 && *sectnum < 0)
+                        {
+                            vect->vec2 = ov;
+                            *sectnum = os;
+                            return -1;
+                        }
+                        if (--k <= 0) return bad;
                     }
                     else if (bitmap_test(clipsectormap, wal->nextsector) == 0)
                         addclipsect(wal->nextsector);
@@ -1793,6 +1804,8 @@ void getzrange(const vec3_t *pos, int16_t sectnum,
                int32_t *ceilz, int32_t *ceilhit, int32_t *florz, int32_t *florhit,
                int32_t walldist, uint32_t cliptype)
 {
+    MICROPROFILE_SCOPEI("Engine", EDUKE32_FUNCTION, MP_AUTO);
+
     if (sectnum < 0)
     {
         *ceilz = INT32_MIN; *ceilhit = -1;
@@ -1803,6 +1816,7 @@ void getzrange(const vec3_t *pos, int16_t sectnum,
     int32_t clipsectcnt = 0;
 
 #ifdef YAX_ENABLE
+    const int16_t origsectnum = sectnum;
     // YAX round, -1:center, 0:ceiling, 1:floor
     int32_t mcf=-1;
 #endif
@@ -1818,7 +1832,7 @@ void getzrange(const vec3_t *pos, int16_t sectnum,
     const int32_t dawalclipmask = (cliptype&65535);
     const int32_t dasprclipmask = (cliptype>>16);
 
-    vec2_t closest = { pos->x, pos->y };
+    vec2_t closest = pos->vec2;
     if (enginecompatibilitymode == ENGINE_EDUKE32)
         getsectordist(closest, sectnum, &closest);
     if (enginecompatibilitymode == ENGINE_19950829)
@@ -1833,6 +1847,8 @@ void getzrange(const vec3_t *pos, int16_t sectnum,
 #ifdef YAX_ENABLE
     origclipsectorlist[0] = sectnum;
     origclipsectnum = 1;
+    layerclipsectorlist[0] = sectnum;
+    layerclipsectnum = 1;
 #endif
     clipsectorlist[0] = sectnum;
     clipsectnum = 1;
@@ -1880,13 +1896,13 @@ restart_grand:
                     continue;
 
                 int32_t daz, daz2;
-                closest = { pos->x, pos->y };
+                closest = pos->vec2;
                 if (enginecompatibilitymode == ENGINE_EDUKE32)
                     getsectordist(closest, k, &closest);
                 getzsofslope(k,closest.x,closest.y,&daz,&daz2);
 
                 int32_t fz, cz;
-                closest = { pos->x, pos->y };
+                closest = pos->vec2;
                 if (enginecompatibilitymode == ENGINE_EDUKE32)
                     getsectordist(closest, sectq[clipinfo[curidx].qend], &closest);
                 getzsofslope(sectq[clipinfo[curidx].qend],closest.x,closest.y,&cz,&fz);
@@ -1969,10 +1985,12 @@ restart_grand:
 #ifdef YAX_ENABLE
                 if (mcf==-1 && curspr==NULL)
                     origclipsectorlist[origclipsectnum++] = k;
+                if (curspr == NULL)
+                    layerclipsectorlist[layerclipsectnum++] = k;
 #endif
                 //It actually got here, through all the continue's!!!
                 int32_t daz, daz2;
-                closest = { pos->x, pos->y };
+                closest = pos->vec2;
                 if (enginecompatibilitymode == ENGINE_EDUKE32)
                     getsectordist(closest, k, &closest);
                 if (enginecompatibilitymode == ENGINE_19950829)
@@ -1988,7 +2006,7 @@ restart_grand:
                 {
                     int32_t fz,cz, hitwhat=(curspr-(uspritetype *)sprite)+49152;
 
-                    closest = { pos->x, pos->y };
+                    closest = pos->vec2;
                     if (enginecompatibilitymode == ENGINE_EDUKE32)
                         getsectordist(closest, sectq[clipinfo[curidx].qend], &closest);
                     getzsofslope(sectq[clipinfo[curidx].qend],closest.x,closest.y,&cz,&fz);
@@ -2074,7 +2092,7 @@ restart_grand:
                     case CSTAT_SPRITE_ALIGNMENT_WALL:
                     {
                         vec2_t v2;
-                        get_wallspr_points((uspriteptr_t)&sprite[j], &v1.x, &v2.x, &v1.y, &v2.y);
+                        get_wallspr_points(&sprite[j], &v1.x, &v2.x, &v1.y, &v2.y);
 
                         if (clipinsideboxline(pos->x,pos->y,v1.x,v1.y,v2.x,v2.y,walldist+1) != 0)
                         {
@@ -2095,7 +2113,7 @@ restart_grand:
                             continue;
 
                         vec2_t v2, v3, v4;
-                        get_floorspr_points((uspriteptr_t) &sprite[j], pos->x, pos->y, &v1.x, &v2.x, &v3.x, &v4.x,
+                        get_floorspr_points(&sprite[j], pos->x, pos->y, &v1.x, &v2.x, &v3.x, &v4.x,
                                             &v1.y, &v2.y, &v3.y, &v4.y, spriteGetSlope(j));
 
                         vec2_t const da = { mulscale14(sintable[(sprite[j].ang - 256 + 512) & 2047], walldist + 4),
@@ -2149,25 +2167,29 @@ restart_grand:
 
         yax_getbunches(sectnum, &cb, &fb);
 
-        mcf++;
+        if (mcf == -1)
+            mcf = 0;
+
         clipsectcnt = 0; clipsectnum = 0;
 
         int didchange = 0;
+        int newsectnum = sectnum;
+        int mcfchange = 0;
         if (cb>=0 && mcf==0 && *ceilhit==sectnum+16384)
         {
             int i;
-            for (i=0; i<origclipsectnum; i++)
+            for (i=0; i<layerclipsectnum; i++)
             {
-                int const j = origclipsectorlist[i];
+                int const j = layerclipsectorlist[i];
                 if (yax_getbunch(j, YAX_CEILING) >= 0)
                     if (sector[j].ceilingstat&dasecclipmask)
                         break;
             }
 
-            if (i==origclipsectnum)
-                for (i=0; i<origclipsectnum; i++)
+            if (i==layerclipsectnum)
+                for (i=0; i<layerclipsectnum; i++)
                 {
-                    cb = yax_getbunch(origclipsectorlist[i], YAX_CEILING);
+                    cb = yax_getbunch(layerclipsectorlist[i], YAX_CEILING);
                     if (cb < 0)
                         continue;
 
@@ -2176,39 +2198,54 @@ restart_grand:
                         {
                             addclipsect(j);
 
-                            closest = { pos->x, pos->y };
+                            closest = pos->vec2;
                             if (enginecompatibilitymode == ENGINE_EDUKE32)
                                 getsectordist(closest, j, &closest);
                             int const daz = getceilzofslope(j, closest.x, closest.y);
 
                             if (!didchange || daz > *ceilz)
-                                didchange=1, *ceilhit = j+16384, *ceilz = daz;
+                                didchange=1, *ceilhit = j+16384, *ceilz = daz, newsectnum = j;
                         }
                 }
 
             if (clipsectnum==0)
+            {
+                mcfchange = 1;
                 mcf++;
+            }
         }
         else if (mcf==0)
+        {
+            mcfchange = 1;
             mcf++;
+        }
+
+        if (mcfchange)
+        {
+            layerclipsectnum = origclipsectnum;
+            std::copy(origclipsectorlist, origclipsectorlist + origclipsectnum, layerclipsectorlist);
+            sectnum = origsectnum;
+            yax_getbunches(sectnum, &cb, &fb);
+        }
+
 
         didchange = 0;
         if (fb>=0 && mcf==1 && *florhit==sectnum+16384)
         {
             int i=0;
-            for (; i<origclipsectnum; i++)
+            for (; i<layerclipsectnum; i++)
             {
-                int const j = origclipsectorlist[i];
+                int const j = layerclipsectorlist[i];
                 if (yax_getbunch(j, YAX_FLOOR) >= 0)
                     if (sector[j].floorstat&dasecclipmask)
                         break;
             }
 
             // (almost) same as above, but with floors...
-            if (i==origclipsectnum)
-                for (i=0; i<origclipsectnum; i++)
+            if (i==layerclipsectnum)
+                for (i=0; i<layerclipsectnum; i++)
                 {
-                    fb = yax_getbunch(origclipsectorlist[i], YAX_FLOOR);
+                    fb = yax_getbunch(layerclipsectorlist[i], YAX_FLOOR);
                     if (fb < 0)
                         continue;
 
@@ -2217,13 +2254,13 @@ restart_grand:
                         {
                             addclipsect(j);
 
-                            closest = { pos->x, pos->y };
+                            closest = pos->vec2;
                             if (enginecompatibilitymode == ENGINE_EDUKE32)
                                 getsectordist(closest, j, &closest);
                             int const daz = getflorzofslope(j, closest.x,closest.y);
 
                             if (!didchange || daz < *florz)
-                                didchange=1, *florhit = j+16384, *florz = daz;
+                                didchange=1, *florhit = j+16384, *florz = daz, newsectnum = j;
                         }
                 }
         }
@@ -2234,6 +2271,10 @@ restart_grand:
             curidx = -1;
             curspr = NULL;
             clipspritecnt = 0; clipspritenum = 0;
+
+            layerclipsectnum = clipsectnum;
+            std::copy(clipsectorlist, clipsectorlist + clipsectnum, layerclipsectorlist);
+            sectnum = newsectnum;
 
             goto restart_grand;
         }

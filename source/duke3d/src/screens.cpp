@@ -31,6 +31,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "duke3d.h"
 #include "input.h"
 #include "mdsprite.h"
+#include "microprofile.h"
 #include "sbar.h"
 #include "screens.h"
 
@@ -609,7 +610,7 @@ static void G_DrawOverheadMap(int32_t cposx, int32_t cposy, int32_t czoom, int16
             if (i < 0)
                 continue;
 
-            j = klabs(pPlayer->truefz - pPlayer->pos.z) >> 8;
+            j = max(0, pPlayer->truefz - pPlayer->pos.z) >> 8;
             j = mulscale16(czoom * (pSprite->yrepeat + j), yxaspect);
 
             if (j < 22000) j = 22000;
@@ -904,6 +905,8 @@ static void G_PrintFPS(void)
 
 void G_DisplayRest(int32_t smoothratio)
 {
+    MICROPROFILE_SCOPEI("Game", EDUKE32_FUNCTION, MP_YELLOWGREEN);
+
     int32_t i, j;
     palaccum_t tint = PALACCUM_INITIALIZER;
 
@@ -957,6 +960,8 @@ void G_DisplayRest(int32_t smoothratio)
             palaccum_add(&tint, &loogiepal, pp2->loogcnt>>1);
 #endif
     }
+
+    rotatespritesmoothratio = smoothratio;
 
     if (g_restorePalette)
     {
@@ -1182,8 +1187,7 @@ void G_DisplayRest(int32_t smoothratio)
             I_EscapeTriggerClear();
             S_PlaySound(EXITMENUSOUND);
             Menu_Change(MENU_CLOSE);
-            if (!ud.pause_on)
-                S_PauseSounds(false);
+            S_PauseSounds(ud.pause_on || (ud.recstat == 2 && g_demo_paused));
         }
         else if ((g_player[myconnectindex].ps->gm&MODE_MENU) != MODE_MENU &&
             g_player[myconnectindex].ps->newowner == -1 &&
@@ -1360,10 +1364,6 @@ void G_DisplayRest(int32_t smoothratio)
     if (g_Debug)
         G_ShowCacheLocks();
 
-#ifdef LUNATIC
-    El_DisplayErrors();
-#endif
-
 #ifndef EDUKE32_TOUCH_DEVICES
     if (VOLUMEONE)
     {
@@ -1465,10 +1465,6 @@ static void fadepaltile(int32_t r, int32_t g, int32_t b, int32_t start, int32_t 
         start += step;
     } while (start != end+step);
 }
-
-#ifdef LUNATIC
-int32_t g_logoFlags = 255;
-#endif
 
 #ifdef __ANDROID__
 int inExtraScreens = 0;
@@ -1616,6 +1612,8 @@ void gameDisplayTitleScreen(void)
         {
             videoClearScreen(0);
             rotatesprite_fs(160 << 16, 100 << 16, 65536L, 0, BETASCREEN, 0, 0, 2 + 8 + 64 + BGSTRETCH);
+            rotatespritesmoothratio = calc_smoothratio_demo(totalclock, ototalclock, TICRATE);
+
             if (logoflags & LOGO_DUKENUKEM)
             {
                 if (totalclock > 120 && totalclock < (120 + 60))
@@ -1625,10 +1623,10 @@ void gameDisplayTitleScreen(void)
                         titlesound++;
                         S_PlaySound(PIPEBOMB_EXPLODE);
                     }
-                    rotatesprite_fs(160 << 16, 104 << 16, ((int32_t) totalclock - 120) << 10, 0, DUKENUKEM, 0, 0, 2 + 8);
+                    rotatesprite_fs_id(160 << 16, 104 << 16, ((int32_t) totalclock - 120) << 10, 0, DUKENUKEM, 0, 0, 2 + 8, W_DUKENUKEM);
                 }
                 else if (totalclock >= (120 + 60))
-                    rotatesprite_fs(160 << 16, (104) << 16, 60 << 10, 0, DUKENUKEM, 0, 0, 2 + 8);
+                    rotatesprite_fs_id(160 << 16, (104) << 16, 60 << 10, 0, DUKENUKEM, 0, 0, 2 + 8, W_DUKENUKEM);
             }
             else
                 titlesound++;
@@ -1643,11 +1641,12 @@ void gameDisplayTitleScreen(void)
                         S_PlaySound(PIPEBOMB_EXPLODE);
                     }
 
-                    rotatesprite_fs(160 << 16, (104) << 16, 60 << 10, 0, DUKENUKEM, 0, 0, 2 + 8);
-                    rotatesprite_fs(160 << 16, (129) << 16, ((int32_t) totalclock - 220) << 11, 0, THREEDEE, 0, 0, 2 + 8);
+                    if (logoflags & LOGO_DUKENUKEM)
+                        rotatesprite_fs_id(160 << 16, (104) << 16, 60 << 10, 0, DUKENUKEM, 0, 0, 2 + 8, W_DUKENUKEM);
+                    rotatesprite_fs_id(160 << 16, (129) << 16, ((int32_t) totalclock - 220) << 11, 0, THREEDEE, 0, 0, 2 + 8, W_THREEDEE);
                 }
                 else if (totalclock >= (220 + 30))
-                    rotatesprite_fs(160 << 16, (129) << 16, 30 << 11, 0, THREEDEE, 0, 0, 2 + 8);
+                    rotatesprite_fs_id(160 << 16, (129) << 16, 30 << 11, 0, THREEDEE, 0, 0, 2 + 8, W_THREEDEE);
             }
             else
                 titlesound++;
@@ -1657,8 +1656,8 @@ void gameDisplayTitleScreen(void)
                 // JBF 20030804
                 if (totalclock >= 280 && totalclock < 395)
                 {
-                    rotatesprite_fs(160 << 16, (151) << 16, (410 - (int32_t) totalclock) << 12, 0, PLUTOPAKSPRITE + 1,
-                                    (sintable[((int32_t) totalclock << 4) & 2047] >> 11), 0, 2 + 8);
+                    rotatesprite_fs_id(160 << 16, (151) << 16, (410 - (int32_t) totalclock) << 12, 0, PLUTOPAKSPRITE + 1,
+                                    (sintable[((int32_t) totalclock << 4) & 2047] >> 11), 0, 2 + 8, W_PLUTOPAK);
                     if (titlesound == 2)
                     {
                         titlesound++;
@@ -1672,14 +1671,11 @@ void gameDisplayTitleScreen(void)
                         titlesound++;
                         S_PlaySound(PIPEBOMB_EXPLODE);
                     }
-                    rotatesprite_fs(160 << 16, (151) << 16, 30 << 11, 0, PLUTOPAKSPRITE + 1, (sintable[((int32_t) totalclock << 4) & 2047] >> 11), 0,
-                                    2 + 8);
+                    rotatesprite_fs_id(160 << 16, (151) << 16, 30 << 11, 0, PLUTOPAKSPRITE + 1, (sintable[((int32_t) totalclock << 4) & 2047] >> 11), 0,
+                                    2 + 8, W_PLUTOPAK);
                 }
             }
 
-#ifdef LUNATIC
-            g_elEventError = 0;
-#endif
             VM_OnEvent(EVENT_LOGO, -1, screenpeek);
 
             if (g_restorePalette)
@@ -1689,11 +1685,6 @@ void gameDisplayTitleScreen(void)
             }
 
             videoNextPage();
-
-#ifdef LUNATIC
-            if (g_elEventError)
-                break;
-#endif
         }
 
         gameHandleEvents();

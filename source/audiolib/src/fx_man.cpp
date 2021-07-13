@@ -41,6 +41,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 # include "driver_sdl.h"
 #endif
 
+#ifdef __linux__
+# include "driver_alsa.h"
+#endif
+
 int FX_ErrorCode = FX_Ok;
 int FX_Installed;
 int FX_MixRate;
@@ -64,7 +68,7 @@ static int osdcmd_cvar_set_audiolib(osdcmdptr_t parm)
     if (parm->numparms == 0)
     {
 #ifdef _WIN32
-        if (!Bstrcasecmp(parm->name, "mus_winmm_device"))
+        if (!Bstrcasecmp(parm->name, "mus_mme_device"))
             WinMMDrv_MIDI_PrintDevices();
 #endif
 #if defined RENDERTYPESDL && SDL_MAJOR_VERSION >= 2
@@ -75,7 +79,17 @@ static int osdcmd_cvar_set_audiolib(osdcmdptr_t parm)
 
     if (r != OSDCMD_OK || parm->numparms < 1) return r;
 
-    if (!Bstrcasecmp(parm->name, "mus_emidicard"))
+    if (ASS_MIDISoundDriver == ASS_OPL3 && !Bstrcasecmp(parm->name, "mus_emidicard"))
+        MIDI_Restart();
+#ifdef _WIN32
+    else if (ASS_MIDISoundDriver == ASS_WinMM && !Bstrcasecmp(parm->name, "mus_mme_device"))
+        MIDI_Restart();
+#endif
+#ifdef __linux__
+    else if (ASS_MIDISoundDriver == ASS_ALSA && (!Bstrcasecmp(parm->name, "mus_alsa_clientid") || !Bstrcasecmp(parm->name, "mus_alsa_portid")))
+        MIDI_Restart();
+#endif
+    else if (ASS_MIDISoundDriver == ASS_SF2 && (!Bstrcasecmp(parm->name, "mus_sf2_bank") || !Bstrcasecmp(parm->name, "mus_sf2_sampleblocksize")))
         MIDI_Restart();
     else if (!Bstrcasecmp(parm->name, "mus_al_stereo"))
         AL_SetStereo(AL_Stereo);
@@ -106,21 +120,26 @@ void FX_InitCvars(void)
 {
     static osdcvardata_t cvars_audiolib [] ={
         { "mus_emidicard", "force a specific EMIDI instrument set", (void*) &ASS_EMIDICard, CVAR_INT | CVAR_FUNCPTR, -1, 10 },
+#ifdef __linux__
+        { "mus_alsa_clientid", "specify the ALSA MIDI client ID", (void*) &ALSA_ClientID, CVAR_INT | CVAR_FUNCPTR, 0, 255 },
+        { "mus_alsa_portid", "specify the ALSA MIDI port ID", (void*) &ALSA_PortID, CVAR_INT | CVAR_FUNCPTR, 0, 15 },
+#endif
         { "mus_al_additivemode", "enable/disable alternate additive AdLib timbre mode", (void*) &AL_AdditiveMode, CVAR_BOOL, 0, 1 },
         { "mus_al_postamp", "controls post-synthesization OPL3 volume amplification", (void*) &AL_PostAmp, CVAR_INT, 0, 3 },
         { "mus_al_stereo", "enable/disable OPL3 stereo mode", (void*) &AL_Stereo, CVAR_BOOL | CVAR_FUNCPTR, 0, 1 },
-        { "mus_sf2_bank", "SoundFont 2 (.sf2) bank filename",  (void*) SF2_BankFile, CVAR_STRING, 0, sizeof(SF2_BankFile) - 1 },
-        { "mus_sf2_sampleblocksize", "number of samples per effect processing block", (void*) &SF2_EffectSampleBlockSize, CVAR_INT, 1, 64 },
+        { "mus_sf2_bank", "SoundFont 2 (.sf2) bank filename",  (void*) SF2_BankFile, CVAR_STRING | CVAR_FUNCPTR, 0, sizeof(SF2_BankFile) - 1 },
+        { "mus_sf2_sampleblocksize", "number of samples per effect processing block", (void*) &SF2_EffectSampleBlockSize, CVAR_INT | CVAR_FUNCPTR, 1, 64 },
 #ifdef _WIN32
         { "mus_mme_device", "select Windows MME MIDI output device", (void*) &WinMM_DeviceID, CVAR_INT | CVAR_FUNCPTR, -1, WinMMDrv_MIDI_GetNumDevices()-1 },
 #endif
-#ifdef HAVE_XMP
+#if defined HAVE_XMP && 0
         { "mus_xmp_interpolation", "XMP output interpolation: 0: none  1: linear  2: spline", (void*) &MV_XMPInterpolation, CVAR_INT | CVAR_FUNCPTR, 0, 2 },
 #endif
 #if defined RENDERTYPESDL && SDL_MAJOR_VERSION >= 2
         { "snd_sdl_audiodriver", "select SDL audio driver (platform-specific)",
           (void *)SDLAudioDriverName, CVAR_STRING | CVAR_FUNCPTR, 0, sizeof(SDLAudioDriverName) - 1 },
 #endif
+        { "snd_lazyalloc", "use lazy sound allocations", (void*) &MV_LazyAlloc, CVAR_BOOL, 0, 1 },
     };
 
     for (auto& i : cvars_audiolib)
@@ -310,7 +329,22 @@ int FX_StartDemandFeedPlayback(void (*function)(const char** ptr, uint32_t* leng
     return handle;
 }
 
-int FX_SetPrintf(void (*function)(const char *, ...))
+int FX_StartDemandFeedPlayback3D(void (*function)(const char** ptr, uint32_t* length, void* userdata), int bitdepth, int channels, int rate, int pitchoffset,
+    int angle, int distance, int priority, fix16_t volume, intptr_t callbackval, void* userdata)
+{
+    int handle = MV_StartDemandFeedPlayback3D(function, bitdepth, channels, rate,
+        pitchoffset, angle, distance, priority, volume, callbackval, userdata);
+
+    if (handle <= MV_Ok)
+    {
+        FX_SetErrorCode(FX_MultiVocError);
+        handle = FX_Warning;
+    }
+
+    return handle;
+}
+
+int FX_SetPrintf(int (*function)(const char *, ...))
 {
     MV_SetPrintf(function);
 

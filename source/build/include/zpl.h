@@ -109,7 +109,7 @@ ZPL_DEF zpl_virtual_memory zpl_vm_alloc(void *addr, size_t size);
 ZPL_DEF zpl_b32 zpl_vm_free(zpl_virtual_memory vm);
 
 
-#if defined _MSC_VER && !defined __clang__
+#if defined _MSC_VER && !defined __clang__ && !defined(_M_ARM64)
 #define ZPL_HAVE_RDTSC
 zpl_inline zpl_u64 zpl_rdtsc(void) { return __rdtsc( ); }
 #elif defined __i386__
@@ -150,10 +150,8 @@ zpl_inline zpl_u64 zpl_rdtsc(void) {
 #if defined(__aarch64__)
     int64_t r = 0;
     asm volatile("mrs %0, cntvct_el0" : "=r"(r));
-#elif defined(__ARM_ARCH_7A__)
-    uint32_t r = 0;
-    asm volatile("mrc p15, 0, %0, c9, c13, 0" : "=r"(r));
 #elif (__ARM_ARCH >= 6)
+    uint32_t r = 0;
     uint32_t pmccntr;
     uint32_t pmuseren;
     uint32_t pmcntenset;

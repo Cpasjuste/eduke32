@@ -44,7 +44,10 @@
 #include "vfs.h"
 #include "communityapi.h"
 
-#if SDL_MAJOR_VERSION != 1
+#define MICROPROFILE_IMPL
+#include "microprofile.h"
+
+#if SDL_MAJOR_VERSION >= 2
 static SDL_version linked;
 #else
 #define SDL_JoystickNameForIndex(x) SDL_JoystickName(x)
@@ -76,7 +79,7 @@ char quitevent=0, appactive=1, novideo=0;
 // video
 static SDL_Surface *sdl_surface/*=NULL*/;
 
-#if SDL_MAJOR_VERSION==2
+#if SDL_MAJOR_VERSION >= 2
 static SDL_Window *sdl_window=NULL;
 static SDL_GLContext sdl_context=NULL;
 #endif
@@ -97,6 +100,7 @@ static uint16_t sysgamma[3][256];
 char nogl=0;
 #endif
 static int32_t vsync_renderlayer;
+static int vsync_unsupported;
 int32_t maxrefreshfreq=0;
 // last gamma, contrast, brightness
 static float lastvidgcb[3];
@@ -116,7 +120,7 @@ static mutex_t m_initprintf;
 uint16_t joydead[9], joysatur[9];
 
 #ifdef _WIN32
-# if SDL_MAJOR_VERSION != 1
+# if SDL_MAJOR_VERSION >= 2
 //
 // win_gethwnd() -- gets the window handle
 //
@@ -173,7 +177,7 @@ int32_t wm_msgbox(const char *name, const char *fmt, ...)
     if (gtkbuild_msgbox(name, buf) >= 0)
         return 0;
 # endif
-# if SDL_MAJOR_VERSION > 1
+# if SDL_MAJOR_VERSION >= 2
 #  if !defined _WIN32
     // Replace all tab chars with spaces because the hand-rolled SDL message
     // box diplays the former as N/L instead of whitespace.
@@ -221,7 +225,7 @@ int32_t wm_ynbox(const char *name, const char *fmt, ...)
     if (ret >= 0)
         return ret;
 # endif
-# if SDL_MAJOR_VERSION > 1
+# if SDL_MAJOR_VERSION >= 2
     int r = -1;
 
     const SDL_MessageBoxButtonData buttons[] = {
@@ -271,12 +275,7 @@ void wm_setapptitle(const char *name)
         appicon = loadappicon();
 #endif
 
-#if SDL_MAJOR_VERSION == 1
-    SDL_WM_SetCaption(apptitle, NULL);
-
-    if (appicon && sdl_surface)
-        SDL_WM_SetIcon(appicon, 0);
-#else
+#if SDL_MAJOR_VERSION >= 2
     if (sdl_window)
     {
         SDL_SetWindowTitle(sdl_window, apptitle);
@@ -289,6 +288,11 @@ void wm_setapptitle(const char *name)
             SDL_SetWindowIcon(sdl_window, appicon);
         }
     }
+#else
+    SDL_WM_SetCaption(apptitle, NULL);
+
+    if (appicon && sdl_surface)
+        SDL_WM_SetIcon(appicon, 0);
 #endif
 
     startwin_settitle(apptitle);
@@ -412,7 +416,7 @@ void sdlayer_sethints()
     SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "1");
 #endif
 #if defined SDL_HINT_XINPUT_ENABLED
-    if (!Bgetenv("EDUKE32_NO_XINPUT"))
+    if (Bgetenv("EDUKE32_NO_XINPUT"))
         SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "0");
 #endif
 #endif
@@ -429,6 +433,9 @@ void sdlayer_sethints()
 #if defined SDL_HINT_AUDIO_RESAMPLING_MODE
     SDL_SetHint(SDL_HINT_AUDIO_RESAMPLING_MODE, "3");
 #endif
+#if defined SDL_HINT_MOUSE_RELATIVE_SCALING
+    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SCALING, "0");
+#endif
 }
 
 #ifdef _WIN32
@@ -444,6 +451,11 @@ int SDL_main(int argc, char *argv[])
 int main(int argc, char *argv[])
 #endif
 {
+    MicroProfileOnThreadCreate("Main");
+    MicroProfileSetForceEnable(true);
+    MicroProfileSetEnableAllGroups(true);
+    MicroProfileSetForceMetaCounters(true);
+
 #ifdef __ANDROID__
     if (setjmp(eduke32_exit_jmp_buf))
     {
@@ -550,7 +562,7 @@ int main(int argc, char *argv[])
 }
 
 
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
 static int sdlayer_getswapinterval(int const syncMode)
 {
     static int intervals[] = { -1, 0, 1, 0};
@@ -563,14 +575,21 @@ static int sdlayer_checkvsync(int checkSync)
     int const actualSync = SDL_GL_GetSwapInterval();
     if (actualSync != sdlayer_getswapinterval(checkSync))
     {
-        OSD_Printf("debug: GL driver forcing SwapInterval %d!\n", actualSync);
+        OSD_Printf("GL: driver enforcing SwapInterval %d, unable to configure VSync!\n", actualSync);
         checkSync = actualSync;
+        vsync_unsupported = true;
     }
     return checkSync;
 }
 
 int32_t videoSetVsync(int32_t newSync)
 {
+    if (vsync_unsupported)
+    {
+        OSD_Printf("GL: VSync configuration locked by driver.\n");
+        return vsync_renderlayer;
+    }
+
     if (vsync_renderlayer == newSync)
         return newSync;
 
@@ -583,7 +602,7 @@ int32_t videoSetVsync(int32_t newSync)
         {
             if (newSync == -1)
             {
-                OSD_Printf("debug: GL driver rejected SwapInterval %d!\n", sdlayer_getswapinterval(newSync));
+                OSD_Printf("GL: driver rejected SwapInterval %d, unable to configure adaptive VSync!\n", sdlayer_getswapinterval(newSync));
 
                 newSync = 1;
                 result  = SDL_GL_SetSwapInterval(sdlayer_getswapinterval(newSync));
@@ -591,7 +610,7 @@ int32_t videoSetVsync(int32_t newSync)
 
             if (result == -1)
             {
-                OSD_Printf("debug: GL driver rejected SwapInterval %d!\n", sdlayer_getswapinterval(newSync));
+                OSD_Printf("GL: driver rejected SwapInterval %d, unable to configure VSync!\n", sdlayer_getswapinterval(newSync));
                 newSync = 0;
             }
         }
@@ -614,7 +633,7 @@ int32_t videoSetVsync(int32_t newSync)
 #endif
 
 int32_t sdlayer_checkversion(void);
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
 int32_t sdlayer_checkversion(void)
 {
     SDL_version compiled;
@@ -669,7 +688,7 @@ int32_t initsystem(void)
 #endif
     }
 
-#if SDL_MAJOR_VERSION > 1
+#if SDL_MAJOR_VERSION >= 2
     SDL_StopTextInput();
     SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 #endif
@@ -735,7 +754,7 @@ void uninitsystem(void)
     SDL_Quit();
 
 #ifdef USE_OPENGL
-# if SDL_MAJOR_VERSION!=1
+# if SDL_MAJOR_VERSION >= 2
     SDL_GL_UnloadLibrary();
 # endif
 # ifdef POLYMER
@@ -764,17 +783,19 @@ void system_getcvars(void)
 //
 // initprintf() -- prints a formatted string to the initialization window
 //
-void initprintf(const char *f, ...)
+int initprintf(const char *f, ...)
 {
     va_list va;
     char buf[2048];
 
     va_start(va, f);
-    Bvsnprintf(buf, sizeof(buf), f, va);
+    int len = Bvsnprintf(buf, sizeof(buf), f, va);
     va_end(va);
 
     osdstrings.append(Xstrdup(buf));
     initputs(buf);
+
+    return len;
 }
 
 
@@ -817,16 +838,18 @@ void initputs(const char *buf)
 //
 // debugprintf() -- prints a formatted debug string to stderr
 //
-void debugprintf(const char *f, ...)
+int debugprintf(const char *f, ...)
 {
 #if defined DEBUGGINGAIDS && !(defined __APPLE__ && defined __BIG_ENDIAN__)
     va_list va;
 
     va_start(va,f);
-    Bvfprintf(stderr, f, va);
+    int len = Bvfprintf(stderr, f, va);
     va_end(va);
+    return len;
 #else
     UNREFERENCED_PARAMETER(f);
+    return 0;
 #endif
 }
 
@@ -845,6 +868,7 @@ void debugprintf(const char *f, ...)
 static SDL_Joystick *joydev = NULL;
 #if SDL_MAJOR_VERSION >= 2
 static SDL_GameController *controller = NULL;
+static SDL_Haptic *haptic = NULL;
 
 static void LoadSDLControllerDB()
 {
@@ -894,11 +918,18 @@ static void LoadSDLControllerDB()
 }
 #endif
 
+static int numjoysticks;
+
 void joyScanDevices()
 {
-    inputdevices &= ~4;
+    inputdevices &= ~(DEV_JOYSTICK | DEV_HAPTIC);
 
 #if SDL_MAJOR_VERSION >= 2
+    if (haptic)
+    {
+        SDL_HapticClose(haptic);
+        haptic = nullptr;
+    }
     if (controller)
     {
         SDL_GameControllerClose(controller);
@@ -911,47 +942,88 @@ void joyScanDevices()
         joydev = nullptr;
     }
 
-    int numjoysticks = SDL_NumJoysticks();
+    numjoysticks = SDL_NumJoysticks();
+
     if (numjoysticks < 1)
     {
-        buildputs("No game controllers found\n");
+        buildprintf("No game controllers found\n");
     }
     else
     {
-        buildputs("Game controllers:\n");
+        buildprintf("Game controllers:\n");
+
+        char name[128];
+
         for (int i = 0; i < numjoysticks; i++)
         {
-            const char * name;
 #if SDL_MAJOR_VERSION >= 2
             if (SDL_IsGameController(i))
-                name = SDL_GameControllerNameForIndex(i);
+                Bstrncpyz(name, SDL_GameControllerNameForIndex(i), sizeof(name));
             else
 #endif
-                name = SDL_JoystickNameForIndex(i);
-
-            buildprintf("  %d. %s\n", i+1, name);
+                Bstrncpyz(name, SDL_JoystickNameForIndex(i), sizeof(name));
+                
+            buildprintf("  %d. %s\n", i + 1, name);
         }
-
+#if SDL_MAJOR_VERSION >= 2
+        int const numhaptics = SDL_NumHaptics();
+        if (numhaptics > 0)
+        {
+            buildprintf("Haptic devices:\n");
+            for (int i = 0; i < numhaptics; i++)
+                buildprintf("  %d. %s\n", i+1, SDL_HapticName(i));
+        }
+#endif
 #if SDL_MAJOR_VERSION >= 2
         for (int i = 0; i < numjoysticks; i++)
         {
             if ((controller = SDL_GameControllerOpen(i)))
             {
-                buildprintf("Using controller %s\n", SDL_GameControllerName(controller));
+#if SDL_MINOR_VERSION > 0 || SDL_PATCHLEVEL >= 14
+                if (EDUKE32_SDL_LINKED_PREREQ(linked, 2, 0, 14))
+                    Bsnprintf(name, sizeof(name), "%s [%s]", SDL_GameControllerName(controller), SDL_GameControllerGetSerial(controller));
+                else
+#endif
+                    Bsnprintf(name, sizeof(name), "%s", SDL_GameControllerName(controller));
 
-                joystick.numAxes    = SDL_CONTROLLER_AXIS_MAX;
+                buildprintf("Using controller: %s\n", name);
+
                 joystick.numBalls   = 0;
-                joystick.numButtons = SDL_CONTROLLER_BUTTON_MAX;
                 joystick.numHats    = 0;
+                joystick.numAxes    = SDL_CONTROLLER_AXIS_MAX;
+                joystick.numButtons = SDL_CONTROLLER_BUTTON_MAX;
 
+                joystick.validButtons = UINT32_MAX;
+#if SDL_MINOR_VERSION > 0 || SDL_PATCHLEVEL >= 14
+                if (EDUKE32_SDL_LINKED_PREREQ(linked, 2, 0, 14))
+                {
+                    joystick.numAxes = 0;
+                    for (int j = 0; j < SDL_CONTROLLER_AXIS_MAX; ++j)
+                        if (SDL_GameControllerHasAxis(controller, (SDL_GameControllerAxis)j))
+                            joystick.numAxes = j + 1;
+
+                    joystick.validButtons = 0;
+                    joystick.numButtons = 0;
+                    for (int j = 0; j < SDL_CONTROLLER_BUTTON_MAX; ++j)
+                        if (SDL_GameControllerHasButton(controller, (SDL_GameControllerButton)j))
+                        {
+                            joystick.numButtons = j + 1;
+                            joystick.validButtons |= (1 << j);
+                        }
+                }
+#endif
                 joystick.isGameController = 1;
 
                 Xfree(joystick.pAxis);
                 joystick.pAxis = (int32_t *)Xcalloc(joystick.numAxes, sizeof(int32_t));
-                Xfree(joystick.pHat);
-                joystick.pHat = nullptr;
+                DO_FREE_AND_NULL(joystick.pHat);
 
-                inputdevices |= 4;
+                inputdevices |= DEV_JOYSTICK;
+
+                auto joy = SDL_GameControllerGetJoystick(controller);
+                if ((haptic = SDL_HapticOpenFromJoystick(joy)) || !SDL_GameControllerRumble(controller, 0xffff, 0xffff, 200))
+                    inputdevices |= DEV_HAPTIC;
+                else buildprintf("%s\n", SDL_GetError());
 
                 return;
             }
@@ -962,7 +1034,7 @@ void joyScanDevices()
         {
             if ((joydev = SDL_JoystickOpen(i)))
             {
-                buildprintf("Using joystick %s\n", SDL_JoystickNameForIndex(i));
+                buildprintf("Using joystick: %s\n", SDL_JoystickNameForIndex(i));
 
                 // KEEPINSYNC duke3d/src/gamedefs.h, mact/include/_control.h
                 joystick.numAxes    = min(9, SDL_JoystickNumAxes(joydev));
@@ -970,6 +1042,7 @@ void joyScanDevices()
                 joystick.numButtons = min(32, SDL_JoystickNumButtons(joydev));
                 joystick.numHats    = min((36 - joystick.numButtons) / 4, SDL_JoystickNumHats(joydev));
 
+                joystick.validButtons = UINT32_MAX;
                 joystick.isGameController = 0;
 
                 buildprint("Joystick ", i+1, " has ", joystick.numAxes, " axes, ", joystick.numButtons, " buttons, ");
@@ -991,22 +1064,34 @@ void joyScanDevices()
                     joystick.pHat[j] = -1; // center
 
                 SDL_JoystickEventState(SDL_ENABLE);
-                inputdevices |= 4;
+                inputdevices |= DEV_JOYSTICK;
 
+#if SDL_MAJOR_VERSION >= 2
+                if ((haptic = SDL_HapticOpenFromJoystick(joydev)) || !SDL_JoystickRumble(joydev, 0xffff, 0xffff, 200))
+                    inputdevices |= DEV_HAPTIC;
+                else buildprintf("%s\n", SDL_GetError());
+#endif
                 return;
             }
         }
 
-        buildputs("No controllers are usable\n");
+        buildprintf("No controllers are usable\n");
     }
 }
 
 //
 // initinput() -- init input system
 //
-int32_t initinput(void)
+int32_t initinput(void(*hotplugCallback)(void) /*= nullptr*/)
 {
     int32_t i;
+
+#if SDL_MAJOR_VERSION >= 2
+    if (hotplugCallback)
+        g_controllerHotplugCallback = hotplugCallback;
+#else
+    UNREFERENCED_PARAMETER(hotplugCallback);
+#endif
 
 #if defined EDUKE32_OSX
     // force OS X to operate in >1 button mouse mode so that LMB isn't adulterated
@@ -1017,12 +1102,12 @@ int32_t initinput(void)
     }
 #endif
 
-    inputdevices = 1 | 2;  // keyboard (1) and mouse (2)
-    g_mouseGrabbed = 0;
+    inputdevices = DEV_KEYBOARD | DEV_MOUSE;
+    g_mouseGrabbed = false;
 
     memset(g_keyNameTable, 0, sizeof(g_keyNameTable));
 
-#if SDL_MAJOR_VERSION == 1
+#if SDL_MAJOR_VERSION < 2
 #define SDL_SCANCODE_TO_KEYCODE(x) (SDLKey)(x)
 #define SDL_NUM_SCANCODES SDLK_LAST
     if (SDL_EnableKeyRepeat(250, 30))
@@ -1039,7 +1124,7 @@ int32_t initinput(void)
     }
 
 #if SDL_MAJOR_VERSION >= 2
-    if (!SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER))
+    if (!SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC))
 #else
     if (!SDL_InitSubSystem(SDL_INIT_JOYSTICK))
 #endif
@@ -1047,9 +1132,11 @@ int32_t initinput(void)
 #if SDL_MAJOR_VERSION >= 2
         LoadSDLControllerDB();
 #endif
-
         joyScanDevices();
     }
+
+    if (inputdevices & DEV_HAPTIC)
+        buildprintf("Controller rumble enabled\n");
 
     return 0;
 }
@@ -1062,17 +1149,23 @@ void uninitinput(void)
     mouseUninit();
 
 #if SDL_MAJOR_VERSION >= 2
+    if (haptic)
+    {
+        SDL_HapticClose(haptic);
+        haptic = nullptr;
+    }
+
     if (controller)
     {
         SDL_GameControllerClose(controller);
-        controller = NULL;
+        controller = nullptr;
     }
 #endif
 
     if (joydev)
     {
         SDL_JoystickClose(joydev);
-        joydev = NULL;
+        joydev = nullptr;
     }
 }
 
@@ -1090,10 +1183,6 @@ const char *joyGetName(int32_t what, int32_t num)
 #if SDL_MAJOR_VERSION >= 2
             if (controller)
             {
-# if 0
-                // Use this if SDL's provided strings ever become user-friendly.
-                return SDL_GameControllerGetStringForAxis((SDL_GameControllerAxis)num);
-# else
                 static char const * axisStrings[] =
                 {
                     "Left Stick X-Axis",
@@ -1104,8 +1193,8 @@ const char *joyGetName(int32_t what, int32_t num)
                     "Right Trigger",
                     NULL
                 };
-                return axisStrings[num];
-# endif
+
+                return num < ARRAY_SSIZE(axisStrings) - 1 ? axisStrings[num] : SDL_GameControllerGetStringForAxis((SDL_GameControllerAxis)num);
             }
 #endif
 
@@ -1119,10 +1208,6 @@ const char *joyGetName(int32_t what, int32_t num)
 #if SDL_MAJOR_VERSION >= 2
             if (controller)
             {
-# if 0
-                // See above.
-                return SDL_GameControllerGetStringForButton((SDL_GameControllerButton)num);
-# else
                 static char const * buttonStrings[] =
                 {
                     "A",
@@ -1140,10 +1225,16 @@ const char *joyGetName(int32_t what, int32_t num)
                     "D-Pad Down",
                     "D-Pad Left",
                     "D-Pad Right",
+                    "Misc",
+                    "Paddle 1",
+                    "Paddle 2",
+                    "Paddle 3",
+                    "Paddle 4",
+                    "Touchpad",
                     NULL
                 };
-                return buttonStrings[num];
-# endif
+
+                return num < ARRAY_SSIZE(buttonStrings) - 1 ? buttonStrings[num] : SDL_GameControllerGetStringForButton((SDL_GameControllerButton)num);
             }
 #endif
 
@@ -1180,12 +1271,22 @@ void mouseUninit(void)
 }
 
 
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
 //
 // grabmouse_low() -- show/hide mouse cursor, lower level (doesn't check state).
 //                    furthermore return 0 if successful.
 //
 
+#if defined _WIN32 && SDL_MINOR_VERSION == 0 && SDL_PATCHLEVEL < 13
+// bypass SDL_SetWindowGrab--see https://bugzilla.libsdl.org/show_bug.cgi?id=4748
+static void SetWindowGrab(SDL_Window *pWindow, int const clipToWindow)
+{
+    UNREFERENCED_PARAMETER(pWindow);
+    RECT rect { windowx, windowy, windowx + xdim, windowy + ydim };
+    ClipCursor(clipToWindow ? &rect : nullptr);
+}
+#define SDL_SetWindowGrab SetWindowGrab
+#endif
 static inline char grabmouse_low(char a)
 {
 #if !defined EDUKE32_TOUCH_DEVICES
@@ -1199,6 +1300,7 @@ static inline char grabmouse_low(char a)
     return 0;
 #endif
 }
+#undef SDL_SetWindowGrab
 #endif
 
 //
@@ -1281,7 +1383,7 @@ static int sortmodes(const void *a_, const void *b_)
 
 static char modeschecked=0;
 
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
 void videoGetModes(void)
 {
     int32_t i, maxx = 0, maxy = 0;
@@ -1409,7 +1511,11 @@ static void destroy_window_resources()
 /* We should NOT destroy the window surface. This is done automatically
    when SDL_DestroyWindow or SDL_SetVideoMode is called.             */
 
-#if SDL_MAJOR_VERSION == 2
+#if MICROPROFILE_ENABLED != 0
+    MicroProfileGpuShutdown();
+#endif
+
+#if SDL_MAJOR_VERSION >= 2
     if (sdl_context)
         SDL_GL_DeleteContext(sdl_context);
     sdl_context = NULL;
@@ -1516,7 +1622,7 @@ void setvideomode_sdlcommonpost(int32_t x, int32_t y, int32_t c, int32_t fs, int
     if (!gammabrightness)
     {
         //        float f = 1.0 + ((float)curbrightness / 10.0);
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
         if (SDL_GetWindowGammaRamp(sdl_window, sysgamma[0], sysgamma[1], sysgamma[2]) == 0)
 #else
         if (SDL_GetGammaRamp(sysgamma[0], sysgamma[1], sysgamma[2]) >= 0)
@@ -1535,7 +1641,7 @@ void setvideomode_sdlcommonpost(int32_t x, int32_t y, int32_t c, int32_t fs, int
         mouseGrabInput(g_mouseLockedToWindow);
 }
 
-#if SDL_MAJOR_VERSION!=1
+#if SDL_MAJOR_VERSION >= 2
 void setrefreshrate(void)
 {
     int const display = r_displayindex < SDL_GetNumVideoDisplays() ? r_displayindex : 0;
@@ -1678,6 +1784,10 @@ int32_t videoSetMode(int32_t x, int32_t y, int32_t c, int32_t fs)
 
     setvideomode_sdlcommonpost(x, y, c, fs, regrab);
 
+#if MICROPROFILE_ENABLED != 0
+    MicroProfileGpuInitGL();
+#endif
+
     return 0;
 }
 #endif
@@ -1790,7 +1900,7 @@ void videoEndDrawing(void)
 //
 // showframe() -- update the display
 //
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
 
 #ifdef __ANDROID__
 extern "C" void AndroidDrawControls();
@@ -1822,7 +1932,10 @@ void videoShowFrame(int32_t w)
         }
 
         if ((r_glfinish == 1 && r_finishbeforeswap == 1) || vsync_renderlayer == 2)
+        {
+            MICROPROFILE_SCOPEI("Engine", "glFinish", MP_GREEN);
             glFinish();
+        }
 
 #ifdef _WIN32
         if (vsync_renderlayer == 2)
@@ -1833,19 +1946,39 @@ void videoShowFrame(int32_t w)
 
             // TODO: use timing information to determine swap time and just busy loop ourselves for more timing control
             if (swapTime < nextSwapTime)
+            {
+                MICROPROFILE_SCOPEI("Engine", "waitForVBlank", MP_GREEN2);
                 windowsWaitForVBlank();
-
-            if (swapTime > nextSwapTime + swapInterval)
+            }
+            else if (swapTime - nextSwapTime >= swapInterval)
                 nextSwapTime += swapInterval;
 
             nextSwapTime += swapInterval;
         }
 #endif
 
-        SDL_GL_SwapWindow(sdl_window);
+        {
+            MICROPROFILE_SCOPEI("Engine", "SDL_GL_SwapWindow", MP_GREEN3);
+            SDL_GL_SwapWindow(sdl_window);
+        }
 
         if (r_glfinish == 1 && r_finishbeforeswap == 0 && vsync_renderlayer != 2)
+        {
+            MICROPROFILE_SCOPEI("Engine", "glFinish2", MP_GREEN4);
             glFinish();
+        }
+
+        MicroProfileFlip();
+
+        // attached overlays and streaming hooks tend to change the GL state without setting it back
+
+        if (w != -1)
+        {
+            if (bpp > 8)
+                polymost_resetVertexPointers();
+            else
+                glsurface_refresh();
+        }
 
         return;
     }
@@ -1870,6 +2003,8 @@ void videoShowFrame(int32_t w)
         sdl_surface = SDL_GetWindowSurface(sdl_window);
         SDL_UpdateWindowSurface(sdl_window);
     }
+
+    MicroProfileFlip();
 }
 #endif
 //
@@ -1923,7 +2058,7 @@ int32_t videoSetGamma(void)
 
     for (i = 0; i < 256; i++)
     {
-        float val = i * contrast - (contrast - 1.f) * 127.f;
+        float val = max(0.f, i * contrast - (contrast - 1.f) * 127.f);
         if (gamma != 1.f)
             val = powf(val, invgamma) / norm;
 
@@ -1932,41 +2067,32 @@ int32_t videoSetGamma(void)
         gammaTable[i] = gammaTable[i + 256] = gammaTable[i + 512] = (uint16_t)max(0.f, min(65535.f, val * 256.f));
     }
 
-#if SDL_MAJOR_VERSION == 1
-    i = SDL_SetGammaRamp(&gammaTable[0], &gammaTable[256], &gammaTable[512]);
-    if (i != -1)
-#else
+#if SDL_MAJOR_VERSION >= 2
     i = INT32_MIN;
 
     if (sdl_window)
         i = SDL_SetWindowGammaRamp(sdl_window, &gammaTable[0], &gammaTable[256], &gammaTable[512]);
+#else
+    i = SDL_SetGammaRamp(&gammaTable[0], &gammaTable[256], &gammaTable[512]);
+    if (i != -1)
+#endif
 
     if (i < 0)
     {
-#ifndef __ANDROID__  // Don't do this check, it is really supported, TODO
-/*
         if (i != INT32_MIN)
-            initprintf("Unable to set gamma: SDL_SetWindowGammaRamp failed: %s\n", SDL_GetError());
-*/
-#endif
-
-#ifndef __SWITCH__
-        OSD_Printf("videoSetGamma(): %s\n", SDL_GetError());
-#endif
+            OSD_Printf("videoSetGamma(): %s\n", SDL_GetError());
 
 #ifndef EDUKE32_GLES
-#if SDL_MAJOR_VERSION == 1
-        SDL_SetGammaRamp(&sysgamma[0][0], &sysgamma[1][0], &sysgamma[2][0]);
-#else
-
+#if SDL_MAJOR_VERSION >= 2
         if (sdl_window)
             SDL_SetWindowGammaRamp(sdl_window, &sysgamma[0][0], &sysgamma[1][0], &sysgamma[2][0]);
+#else
+        SDL_SetGammaRamp(&sysgamma[0][0], &sysgamma[1][0], &sysgamma[2][0]);
 #endif
         gammabrightness = 0;
 #endif
     }
     else
-#endif
     {
         lastvidgcb[0] = gamma;
         lastvidgcb[1] = contrast;
@@ -2002,10 +2128,10 @@ int32_t handleevents_peekkeys(void)
 {
     SDL_PumpEvents();
 
-#if SDL_MAJOR_VERSION==1
-    return SDL_PeepEvents(NULL, 1, SDL_PEEKEVENT, SDL_EVENTMASK(SDL_KEYDOWN));
-#else
+#if SDL_MAJOR_VERSION >= 2
     return SDL_PeepEvents(NULL, 1, SDL_PEEKEVENT, SDL_KEYDOWN, SDL_KEYDOWN);
+#else
+    return SDL_PeepEvents(NULL, 1, SDL_PEEKEVENT, SDL_EVENTMASK(SDL_KEYDOWN));
 #endif
 }
 
@@ -2038,13 +2164,13 @@ int32_t handleevents_sdlcommon(SDL_Event *ev)
             //  <VER> is 1.3 for PK, 1.2 for tueidj
             if (appactive && g_mouseGrabbed)
             {
-# if SDL_MAJOR_VERSION==1
+# if SDL_MAJOR_VERSION < 2
                 if (ev->motion.x != xdim >> 1 || ev->motion.y != ydim >> 1)
 # endif
                 {
                     g_mousePos.x += ev->motion.xrel;
                     g_mousePos.y += ev->motion.yrel;
-# if SDL_MAJOR_VERSION==1
+# if SDL_MAJOR_VERSION < 2
                     SDL_WarpMouse(xdim>>1, ydim>>1);
 # endif
                 }
@@ -2064,14 +2190,14 @@ int32_t handleevents_sdlcommon(SDL_Event *ev)
                 case SDL_BUTTON_RIGHT: j = 1; break;
                 case SDL_BUTTON_MIDDLE: j = 2; break;
 
-#if SDL_MAJOR_VERSION == 1
+#if SDL_MAJOR_VERSION < 2
                 case SDL_BUTTON_WHEELUP:    // 4
                 case SDL_BUTTON_WHEELDOWN:  // 5
                     j = ev->button.button;
                     break;
 #endif
                 /* Thumb buttons. */
-#if SDL_MAJOR_VERSION==1
+#if SDL_MAJOR_VERSION < 2
                 // NOTE: SDL1 does have SDL_BUTTON_X1, but that's not what is
                 // generated. (Only tested on Linux and Windows.)
                 case 8: j = 3; break;
@@ -2090,7 +2216,7 @@ int32_t handleevents_sdlcommon(SDL_Event *ev)
             if (ev->button.state == SDL_PRESSED)
                 g_mouseBits |= (1 << j);
             else
-#if SDL_MAJOR_VERSION==1
+#if SDL_MAJOR_VERSION < 2
                 if (j != SDL_BUTTON_WHEELUP && j != SDL_BUTTON_WHEELDOWN)
 #endif
                 g_mouseBits &= ~(1 << j);
@@ -2100,7 +2226,7 @@ int32_t handleevents_sdlcommon(SDL_Event *ev)
             break;
         }
 #else
-# if SDL_MAJOR_VERSION != 1
+# if SDL_MAJOR_VERSION >= 2
         case SDL_FINGERUP:
             g_mouseClickState = MOUSE_RELEASED;
             break;
@@ -2112,7 +2238,13 @@ int32_t handleevents_sdlcommon(SDL_Event *ev)
             break;
 # endif
 #endif
-
+#if SDL_MAJOR_VERSION >= 2
+        case SDL_CONTROLLERDEVICEADDED:
+        case SDL_CONTROLLERDEVICEREMOVED:
+            if (g_controllerHotplugCallback && SDL_NumJoysticks() != numjoysticks)
+                g_controllerHotplugCallback();
+            break;
+#endif
         case SDL_JOYAXISMOTION:
 #if SDL_MAJOR_VERSION >= 2
             if (joystick.isGameController)
@@ -2193,7 +2325,7 @@ int32_t handleevents_sdlcommon(SDL_Event *ev)
 }
 
 int32_t handleevents_pollsdl(void);
-#if SDL_MAJOR_VERSION != 1
+#if SDL_MAJOR_VERSION >= 2
 // SDL 2.0 specific event handling
 int32_t handleevents_pollsdl(void)
 {
@@ -2470,6 +2602,6 @@ int32_t handleevents(void)
     return rv;
 }
 
-#if SDL_MAJOR_VERSION == 1
-#include "sdlayer12.cpp"
+#if SDL_MAJOR_VERSION < 2
+# include "sdlayer12.cpp"
 #endif

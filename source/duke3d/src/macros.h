@@ -77,6 +77,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define SK_WEAPON_BITS1 9
 #define SK_WEAPON_BITS2 10
 #define SK_WEAPON_BITS3 11
+#define SK_WEAPON_MASK ((1 << SK_WEAPON_BITS) | (1 << SK_WEAPON_BITS1) | (1 << SK_WEAPON_BITS2) | (1 << SK_WEAPON_BITS3))
 #define SK_STEROIDS     12
 #define SK_LOOK_UP      13
 #define SK_LOOK_DOWN    14
@@ -97,6 +98,17 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define SK_OPEN         29
 #define SK_INVENTORY    30
 #define SK_ESCAPE       31
+
+#define EK_MOVE_FORWARD         0
+#define EK_MOVE_BACKWARD        1
+#define EK_STRAFE_LEFT          2
+#define EK_STRAFE_RIGHT         3
+#define EK_TURN_LEFT            4
+#define EK_TURN_RIGHT           5
+#define EK_ALT_FIRE             6
+#define EK_CHAT_MODE            7
+#define EK_GAMEPAD_CENTERING    8
+#define EK_GAMEPAD_AIM_ASSIST   9
 
 // rotatesprite flags
 #define ROTATE_SPRITE_TRANSLUCENT   (BIT(0))

@@ -35,6 +35,18 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "savegame.h"
 #include "vfs.h"
 
+#include "microprofile.h"
+
+#if MICROPROFILE_ENABLED != 0
+MicroProfileToken g_eventTokens[MAXEVENTS];
+MicroProfileToken g_eventCounterTokens[MAXEVENTS];
+MicroProfileToken g_actorTokens[MAXTILES];
+MicroProfileToken g_statnumTokens[MAXSTATUS];
+#if 0
+MicroProfileToken g_instTokens[CON_END];
+#endif
+#endif
+
 #define LINE_NUMBER (g_lineNumber << 12)
 
 int32_t g_scriptVersion = 13; // 13 = 1.3D-style CON files, 14 = 1.4/1.5 style CON files
@@ -43,10 +55,8 @@ char g_scriptFileName[BMAX_PATH] = "(none)";  // file we're currently compiling
 
 int32_t g_totalLines;
 int32_t g_lineNumber;
-uint32_t g_scriptcrc;
 char g_szBuf[1024];
 
-#if !defined LUNATIC
 static char *textptr;
 
 static char g_szCurrentBlockName[64] = "(none)";
@@ -58,6 +68,7 @@ static bool g_dynamicTileMapping;
 static bool g_labelsOnly;
 static bool g_processingState;
 static bool g_skipBranch;
+static bool g_switchCountPhase = false;
 
 static int g_checkingIfElse;
 static int g_checkingSwitch;
@@ -77,17 +88,11 @@ static intptr_t *g_caseTablePtr;
 
 static bool C_ParseCommand(bool loop = false);
 static void C_SetScriptSize(int32_t newsize);
-#endif
 
 int32_t g_errorCnt;
 int32_t g_warningCnt;
 int32_t g_numXStrings;
 
-#ifdef LUNATIC
-weapondata_t g_playerWeapon[MAXPLAYERS][MAX_WEAPONS];
-#endif
-
-#if !defined LUNATIC
 static char *C_GetLabelType(int const type)
 {
     static tokenmap_t const LabelType[] =
@@ -132,7 +137,6 @@ static hashtable_t *const tables[] = {
 static hashtable_t *const tables_free[] = {
     &h_iter,
     &h_keywords,
-    &h_labels,
 };
 
 static tokenmap_t const vm_keywords[] =
@@ -687,9 +691,10 @@ static const vec2_t varvartable[] =
     { CON_XORVARVAR,         CON_XORVAR },
 };
 
-#ifdef CON_DISCRETE_VAR_ACCESS
 static const vec2_t globalvartable[] =
 {
+    { CON_SETVAR,         CON_SETVAR_GLOBAL },
+#ifdef CON_DISCRETE_VAR_ACCESS
     { CON_IFVARA,         CON_IFVARA_GLOBAL },
     { CON_IFVARAE,        CON_IFVARAE_GLOBAL },
     { CON_IFVARAND,       CON_IFVARAND_GLOBAL },
@@ -715,15 +720,17 @@ static const vec2_t globalvartable[] =
     { CON_MULVAR,         CON_MULVAR_GLOBAL },
     { CON_ORVAR,          CON_ORVAR_GLOBAL },
     { CON_RANDVAR,        CON_RANDVAR_GLOBAL },
-    { CON_SETVAR,         CON_SETVAR_GLOBAL },
     { CON_SHIFTVARL,      CON_SHIFTVARL_GLOBAL },
     { CON_SHIFTVARR,      CON_SHIFTVARR_GLOBAL },
     { CON_SUBVAR,         CON_SUBVAR_GLOBAL },
     { CON_XORVAR,         CON_XORVAR_GLOBAL },
+#endif
 };
 
 static const vec2_t playervartable[] =
 {
+    { CON_SETVAR,         CON_SETVAR_PLAYER },
+#ifdef CON_DISCRETE_VAR_ACCESS
     { CON_IFVARA,         CON_IFVARA_PLAYER },
     { CON_IFVARAE,        CON_IFVARAE_PLAYER },
     { CON_IFVARAND,       CON_IFVARAND_PLAYER },
@@ -749,15 +756,17 @@ static const vec2_t playervartable[] =
     { CON_MULVAR,         CON_MULVAR_PLAYER },
     { CON_ORVAR,          CON_ORVAR_PLAYER },
     { CON_RANDVAR,        CON_RANDVAR_PLAYER },
-    { CON_SETVAR,         CON_SETVAR_PLAYER },
     { CON_SHIFTVARL,      CON_SHIFTVARL_PLAYER },
     { CON_SHIFTVARR,      CON_SHIFTVARR_PLAYER },
     { CON_SUBVAR,         CON_SUBVAR_PLAYER },
     { CON_XORVAR,         CON_XORVAR_PLAYER },
+#endif
 };
 
 static const vec2_t actorvartable[] =
 {
+    { CON_SETVAR,         CON_SETVAR_ACTOR },
+#ifdef CON_DISCRETE_VAR_ACCESS
     { CON_IFVARA,         CON_IFVARA_ACTOR },
     { CON_IFVARAE,        CON_IFVARAE_ACTOR },
     { CON_IFVARAND,       CON_IFVARAND_ACTOR },
@@ -783,28 +792,23 @@ static const vec2_t actorvartable[] =
     { CON_MULVAR,         CON_MULVAR_ACTOR },
     { CON_ORVAR,          CON_ORVAR_ACTOR },
     { CON_RANDVAR,        CON_RANDVAR_ACTOR },
-    { CON_SETVAR,         CON_SETVAR_ACTOR },
     { CON_SHIFTVARL,      CON_SHIFTVARL_ACTOR },
     { CON_SHIFTVARR,      CON_SHIFTVARR_ACTOR },
     { CON_SUBVAR,         CON_SUBVAR_ACTOR },
     { CON_XORVAR,         CON_XORVAR_ACTOR },
-};
 #endif
+};
 
 static inthashtable_t h_varvar = { NULL, INTHASH_SIZE(ARRAY_SIZE(varvartable)) };
-#ifdef CON_DISCRETE_VAR_ACCESS
 static inthashtable_t h_globalvar = { NULL, INTHASH_SIZE(ARRAY_SIZE(globalvartable)) };
 static inthashtable_t h_playervar = { NULL, INTHASH_SIZE(ARRAY_SIZE(playervartable)) };
 static inthashtable_t h_actorvar = { NULL, INTHASH_SIZE(ARRAY_SIZE(actorvartable)) };
-#endif
 
 static inthashtable_t *const inttables[] = {
     &h_varvar,
-#ifdef CON_DISCRETE_VAR_ACCESS
     &h_globalvar,
     &h_playervar,
     &h_actorvar,
-#endif
 };
 
 
@@ -833,13 +837,22 @@ const tokenmap_t iter_tokens [] =
 // keywords_for_private_opcodes[] resolves those opcodes to the publicly facing keyword that can generate them
 static const tokenmap_t keywords_for_private_opcodes[] =
 {
-    { "getactor", CON_GETSPRITEEXT },
-    { "getactor", CON_GETACTORSTRUCT },
-    { "getactor", CON_GETSPRITESTRUCT },
+    { "getactor",  CON_GETSPRITEEXT },
+    { "getactor",  CON_GETACTORSTRUCT },
+    { "getactor",  CON_GETSPRITESTRUCT },
 
-    { "setactor", CON_SETSPRITEEXT },
-    { "setactor", CON_SETACTORSTRUCT },
-    { "setactor", CON_SETSPRITESTRUCT },
+    { "setactor",  CON_SETSPRITEEXT },
+    { "setactor",  CON_SETACTORSTRUCT },
+    { "setactor",  CON_SETSPRITESTRUCT },
+
+    { "getwall",   CON_GETWALLSTRUCT },
+    { "setwall",   CON_SETWALLSTRUCT },
+
+    { "getsector", CON_GETSECTORSTRUCT },
+    { "setsector", CON_SETSECTORSTRUCT },
+
+    { "getplayer", CON_GETPLAYERSTRUCT },
+    { "setplayer", CON_SETPLAYERSTRUCT },
 };
 
 char const *VM_GetKeywordForID(int32_t id)
@@ -855,9 +868,8 @@ char const *VM_GetKeywordForID(int32_t id)
 
     return "<unknown instruction>";
 }
-#endif
 
-// KEEPINSYNC with enum GameEvent_t and lunatic/con_lang.lua
+// KEEPINSYNC with enum GameEvent_t
 const char *EventNames[MAXEVENTS] =
 {
     "EVENT_INIT",
@@ -1017,9 +1029,6 @@ const char *EventNames[MAXEVENTS] =
     "EVENT_NEWGAMECUSTOM",
     "EVENT_INITCOMPLETE",
     "EVENT_CAPIR",
-#ifdef LUNATIC
-    "EVENT_ANIMATEALLSPRITES",
-#endif
 };
 
 uint8_t *bitptr; // pointer to bitmap of which bytecode positions contain pointers
@@ -1028,10 +1037,9 @@ uint8_t *bitptr; // pointer to bitmap of which bytecode positions contain pointe
 #define BITPTR_CLEAR(x) bitmap_clear(bitptr, x)
 #define BITPTR_IS_POINTER(x) bitmap_test(bitptr, x)
 
-#if !defined LUNATIC
 hashtable_t h_arrays   = { MAXGAMEARRAYS >> 1, NULL };
 hashtable_t h_gamevars = { MAXGAMEVARS >> 1, NULL };
-hashtable_t h_labels   = { 11264 >> 1, NULL };
+hashtable_t h_labels   = { MAXLABELS >> 1, NULL };
 
 static void C_SetScriptSize(int32_t newsize)
 {
@@ -1039,7 +1047,7 @@ static void C_SetScriptSize(int32_t newsize)
     {
         if (BITPTR_IS_POINTER(i))
         {
-            if (EDUKE32_PREDICT_FALSE(apScript[i] < (intptr_t)apScript || apScript[i] >= (intptr_t)g_scriptPtr))
+            if (EDUKE32_PREDICT_FALSE(apScript[i] < (intptr_t)apScript || apScript[i] > (intptr_t)g_scriptPtr))
             {
                 g_errorCnt++;
                 buildprint("Internal compiler error at ", i, " (0x", hex(i), ")\n");
@@ -1053,11 +1061,17 @@ static void C_SetScriptSize(int32_t newsize)
     G_Util_PtrToIdx2(&g_tile[0].execPtr, MAXTILES, sizeof(tiledata_t), apScript, P2I_FWD_NON0);
     G_Util_PtrToIdx2(&g_tile[0].loadPtr, MAXTILES, sizeof(tiledata_t), apScript, P2I_FWD_NON0);
 
+    size_t old_bitptr_size = (((g_scriptSize + 7) >> 3) + 1) * sizeof(uint8_t);
+    size_t new_bitptr_size = (((newsize + 7) >> 3) + 1) * sizeof(uint8_t);
+
     auto newscript = (intptr_t *)Xrealloc(apScript, newsize * sizeof(intptr_t));
-    bitptr = (uint8_t *)Xrealloc(bitptr, (((newsize + 7) >> 3) + 1) * sizeof(uint8_t));
+    bitptr = (uint8_t *)Xrealloc(bitptr, new_bitptr_size);
 
     if (newsize > g_scriptSize)
+    {
         Bmemset(&newscript[g_scriptSize], 0, (newsize - g_scriptSize) * sizeof(intptr_t));
+        Bmemset(&bitptr[old_bitptr_size], 0, new_bitptr_size - old_bitptr_size);
+    }
 
     if (apScript != newscript)
     {
@@ -1206,6 +1220,14 @@ static inline int32_t C_GetLabelNameOffset(hashtable_t const * const table, cons
 static void C_GetNextLabelName(void)
 {
     int32_t i = 0;
+
+    if (EDUKE32_PREDICT_FALSE(g_labelCnt >= MAXLABELS))
+    {
+        g_errorCnt++;
+        C_ReportError(ERROR_TOOMANYLABELS);
+        G_GameExit("Error: too many labels defined!");
+        return;
+    }
 
     C_SkipComments();
 
@@ -1566,16 +1588,42 @@ static void C_GetNextVarType(int32_t type)
 
                 break;
             case STRUCT_SECTOR:
-                scriptWriteValue(SectorLabels[labelNum].lId);
+                {
+                    auto const &label = SectorLabels[labelNum];
+
+                    scriptWriteValue(label.lId);
+
+                    Bassert((*varptr & (MAXGAMEVARS-1)) == g_structVarIDs + STRUCT_SECTOR);
+
+                    if (label.offset != -1 && (label.flags & LABEL_READFUNC) == 0)
+                        *varptr = (*varptr & ~(MAXGAMEVARS-1)) + g_structVarIDs + STRUCT_SECTOR_INTERNAL__;
+                }
                 break;
             case STRUCT_WALL:
-                scriptWriteValue(WallLabels[labelNum].lId);
+                {
+                    auto const &label = WallLabels[labelNum];
+
+                    scriptWriteValue(label.lId);
+
+                    Bassert((*varptr & (MAXGAMEVARS-1)) == g_structVarIDs + STRUCT_WALL);
+
+                    if (label.offset != -1 && (label.flags & LABEL_READFUNC) == 0)
+                        *varptr = (*varptr & ~(MAXGAMEVARS-1)) + g_structVarIDs + STRUCT_WALL_INTERNAL__;
+                }
                 break;
             case STRUCT_PLAYER:
-                scriptWriteValue(PlayerLabels[labelNum].lId);
+                {
+                    auto const &label = PlayerLabels[labelNum];
 
-                if (PlayerLabels[labelNum].flags & LABEL_HASPARM2)
-                    C_GetNextVarType(0);
+                    scriptWriteValue(label.lId);
+
+                    Bassert((*varptr & (MAXGAMEVARS-1)) == g_structVarIDs + STRUCT_PLAYER);
+
+                    if (label.flags & LABEL_HASPARM2)
+                        C_GetNextVarType(0);
+                    else if (label.offset != -1 && (label.flags & LABEL_READFUNC) == 0)
+                        *varptr = (*varptr & ~(MAXGAMEVARS-1)) + g_structVarIDs + STRUCT_PLAYER_INTERNAL__;
+                }
                 break;
             case STRUCT_ACTORVAR:
             case STRUCT_PLAYERVAR:
@@ -1893,15 +1941,19 @@ static bool C_CheckEmptyBranch(int tw, intptr_t lastScriptPtr)
 
 static int C_CountCaseStatements()
 {
-    char *const    temptextptr      = textptr;
-    int const      backupLineNumber = g_lineNumber;
-    int const      backupNumCases   = g_numCases;
-    intptr_t const casePtrOffset    = g_caseTablePtr - apScript;
-    intptr_t const scriptPtrOffset  = g_scriptPtr - apScript;
+    char *const    temptextptr       = textptr;
+    int const      backupLineNumber  = g_lineNumber;
+    int const      backupNumCases    = g_numCases;
+    intptr_t const casePtrOffset     = g_caseTablePtr - apScript;
+    intptr_t const scriptPtrOffset   = g_scriptPtr - apScript;
+    bool const     backupSwitchCount = g_switchCountPhase;
 
     g_numCases = 0;
     g_caseTablePtr = NULL;
+
+    g_switchCountPhase = true;
     C_ParseCommand(true);
+    g_switchCountPhase  = backupSwitchCount;
 
     // since we processed the endswitch, we need to re-increment g_checkingSwitch
     g_checkingSwitch++;
@@ -1937,7 +1989,6 @@ static void C_Include(const char *confile)
     kclose(fp);
 
     mptr[len] = 0;
-    g_scriptcrc = Bcrc32(mptr, len, g_scriptcrc);
 
     if (*textptr == '"') // skip past the closing quote if it's there so we don't screw up the next line
         textptr++;
@@ -1969,7 +2020,6 @@ static void C_Include(const char *confile)
 
     Xfree(mptr);
 }
-#endif  // !defined LUNATIC
 
 #ifdef _WIN32
 static void check_filename_case(const char *fn)
@@ -2070,92 +2120,6 @@ void C_DefineMusic(int volumeNum, int levelNum, const char *fileName)
     check_filename_case(pMapInfo->musicfn);
 }
 
-#ifdef LUNATIC
-void C_DefineSound(int32_t sndidx, const char *fn, int32_t args[5])
-{
-    Bassert((unsigned)sndidx < MAXSOUNDS);
-
-    {
-        sound_t *const snd = &g_sounds[sndidx];
-
-        Xfree(snd->filename);
-        snd->filename = dup_filename(fn);
-        check_filename_case(snd->filename);
-
-        snd->ps = args[0];
-        snd->pe = args[1];
-        snd->pr = args[2];
-        snd->m = args[3] & ~SF_ONEINST_INTERNAL;
-        if (args[3] & SF_LOOP)
-            snd->m |= SF_ONEINST_INTERNAL;
-        snd->vo = args[4];
-
-        if (sndidx > g_highestSoundIdx)
-            g_highestSoundIdx = sndidx;
-    }
-}
-
-void C_DefineQuote(int32_t qnum, const char *qstr)
-{
-    C_AllocQuote(qnum);
-    Bstrncpyz(apStrings[qnum], qstr, MAXQUOTELEN);
-}
-
-void C_DefineVolumeName(int32_t vol, const char *name)
-{
-    Bassert((unsigned)vol < MAXVOLUMES);
-    Bstrncpyz(g_volumeNames[vol], name, sizeof(g_volumeNames[vol]));
-    g_volumeCnt = vol+1;
-}
-
-void C_DefineSkillName(int32_t skill, const char *name)
-{
-    Bassert((unsigned)skill < MAXSKILLS);
-    Bstrncpyz(g_skillNames[skill], name, sizeof(g_skillNames[skill]));
-    g_skillCnt = max(g_skillCnt, skill+1);  // TODO: bring in line with C-CON?
-}
-
-void C_DefineLevelName(int32_t vol, int32_t lev, const char *fn,
-                       int32_t partime, int32_t designertime,
-                       const char *levelname)
-{
-    Bassert((unsigned)vol < MAXVOLUMES);
-    Bassert((unsigned)lev < MAXLEVELS);
-
-    {
-        map_t *const map = &g_mapInfo[(MAXLEVELS*vol)+lev];
-
-        Xfree(map->filename);
-        map->filename = dup_filename(fn);
-
-        // TODO: truncate to 32 chars?
-        Xfree(map->name);
-        map->name = Xstrdup(levelname);
-
-        map->partime = REALGAMETICSPERSEC * partime;
-        map->designertime = REALGAMETICSPERSEC * designertime;
-    }
-}
-
-void C_DefineGameFuncName(int32_t idx, const char *name)
-{
-    assert((unsigned)idx < NUMGAMEFUNCTIONS);
-
-    Bstrncpyz(gamefunctions[idx], name, MAXGAMEFUNCLEN);
-
-    hash_add(&h_gamefuncs, gamefunctions[idx], idx, 0);
-}
-
-void C_DefineGameType(int32_t idx, int32_t flags, const char *name)
-{
-    Bassert((unsigned)idx < MAXGAMETYPES);
-
-    g_gametypeFlags[idx] = flags;
-    Bstrncpyz(g_gametypeNames[idx], name, sizeof(g_gametypeNames[idx]));
-    g_gametypeCnt = idx+1;
-}
-#endif
-
 void C_DefineVolumeFlags(int32_t vol, int32_t flags)
 {
     Bassert((unsigned)vol < MAXVOLUMES);
@@ -2213,7 +2177,7 @@ void C_UndefineLevel(int32_t vol, int32_t lev)
     map->designertime = 0;
 }
 
-LUNATIC_EXTERN int32_t C_SetDefName(const char *name)
+static int32_t C_SetDefName(const char *name)
 {
     clearDefNamePtr();
     g_defNamePtr = dup_filename(name);
@@ -2239,7 +2203,7 @@ void C_FreeProjectile(int32_t j)
 }
 
 
-LUNATIC_EXTERN void C_DefineProjectile(int32_t j, int32_t what, int32_t val)
+static void C_DefineProjectile(int32_t j, int32_t what, int32_t val)
 {
     if (g_tile[j].proj == NULL)
     {
@@ -2414,7 +2378,7 @@ void C_InitQuotes(void)
     }
 }
 
-LUNATIC_EXTERN void C_SetCfgName(const char *cfgname)
+static void C_SetCfgName(const char *cfgname)
 {
     if (Bstrcmp(g_setupFileName, cfgname) == 0) // no need to do anything if name is the same
         return;
@@ -2460,7 +2424,6 @@ LUNATIC_EXTERN void C_SetCfgName(const char *cfgname)
 #endif
 }
 
-#if !defined LUNATIC
 static inline void C_BitOrNextValue(int32_t *valptr)
 {
     C_GetNextValue(LABEL_DEFINE);
@@ -2488,7 +2451,6 @@ static void scriptUpdateOpcodeForVariableType(intptr_t *ins)
 {
     int opcode = -1;
 
-#ifdef CON_DISCRETE_VAR_ACCESS
     if (ins[1] < MAXGAMEVARS)
     {
         switch (aGameVars[ins[1] & (MAXGAMEVARS - 1)].flags & (GAMEVAR_USER_MASK | GAMEVAR_PTR_MASK))
@@ -2504,7 +2466,6 @@ static void scriptUpdateOpcodeForVariableType(intptr_t *ins)
                 break;
         }
     }
-#endif
 
     if (opcode != -1)
     {
@@ -2668,6 +2629,8 @@ DO_DEFSTATE:
             // flags are used to define usage
             // (see top of this files for flags)
 
+            //Skip comments before calling the check in order to align the textptr onto the label
+            C_SkipComments(); 
             if (EDUKE32_PREDICT_FALSE(isdigit(*textptr) || (*textptr == '-')))
             {
                 g_errorCnt++;
@@ -2717,6 +2680,8 @@ DO_DEFSTATE:
 
         case CON_GAMEARRAY:
         {
+            //Skip comments before calling the check in order to align the textptr onto the label
+            C_SkipComments();
             if (EDUKE32_PREDICT_FALSE(isdigit(*textptr) || (*textptr == '-')))
             {
                 g_errorCnt++;
@@ -2794,10 +2759,10 @@ DO_DEFSTATE:
                 else
                 {
                     hash_add(&h_labels,LAST_LABEL,g_labelCnt,0);
+                    if ((unsigned)g_scriptPtr[-1] < MAXTILES && g_dynamicTileMapping)
+                        G_ProcessDynamicTileMapping(LAST_LABEL, g_scriptPtr[-1]);
                     labeltype[g_labelCnt] = LABEL_DEFINE;
                     labelcode[g_labelCnt++] = g_scriptPtr[-1];
-                    if (g_scriptPtr[-1] >= 0 && g_scriptPtr[-1] < MAXTILES && g_dynamicTileMapping)
-                        G_ProcessDynamicTileMapping(label+((g_labelCnt-1)<<6),g_scriptPtr[-1]);
                 }
                 g_scriptPtr -= 2;
                 continue;
@@ -2838,6 +2803,8 @@ DO_DEFSTATE:
             else
             {
                 g_scriptPtr--;
+                scriptWriteValue(CON_MOVE);
+
                 C_GetNextLabelName();
                 // Check to see it's already defined
 
@@ -2873,9 +2840,9 @@ DO_DEFSTATE:
                 }
 
                 for (k=j; k>=0; k--)
-                {
                     scriptWriteValue(0);
-                }
+
+                scriptWriteValue(CON_END);
             }
             continue;
 
@@ -2958,6 +2925,8 @@ DO_DEFSTATE:
             else
             {
                 g_scriptPtr--;
+                scriptWriteValue(CON_AI);
+
                 C_GetNextLabelName();
 
                 if (EDUKE32_PREDICT_FALSE(hash_find(&h_keywords,LAST_LABEL)>=0))
@@ -3008,18 +2977,13 @@ DO_DEFSTATE:
                             C_BitOrNextValue(&k);
 
                         C_FinishBitOr(k);
-                        j = 666;
-                        break;
                     }
                 }
 
-                if (j == 666)
-                    continue;
-
                 for (k=j; k<3; k++)
-                {
                     scriptWriteValue(0);
-                }
+
+                scriptWriteValue(CON_END);
             }
             continue;
 
@@ -3031,6 +2995,8 @@ DO_DEFSTATE:
             else
             {
                 g_scriptPtr--;
+                scriptWriteValue(CON_ACTION);
+
                 C_GetNextLabelName();
                 // Check to see it's already defined
 
@@ -3068,9 +3034,9 @@ DO_DEFSTATE:
                     C_GetNextValue(LABEL_DEFINE);
                 }
                 for (k=j; k>=0; k--)
-                {
                     scriptWriteValue(0);
-                }
+
+                scriptWriteValue(CON_END);
             }
             continue;
 
@@ -3392,18 +3358,47 @@ DO_DEFSTATE:
             }
 
         case CON_SETSECTOR:
-        case CON_GETSECTOR:
             {
+                intptr_t * const ins = &g_scriptPtr[-1];
                 int const labelNum = C_GetStructureIndexes(1, &h_sector);
 
                 if (labelNum == -1)
                     continue;
 
-                scriptWriteValue(SectorLabels[labelNum].lId);
+                Bassert((*ins & VM_INSTMASK) == CON_SETSECTOR);
 
-                C_GetNextVarType((tw == CON_GETSECTOR) ? GAMEVAR_READONLY : 0);
+                auto const &label = SectorLabels[labelNum];
+
+                if (label.offset != -1 && (label.flags & LABEL_WRITEFUNC) == 0)
+                    *ins = CON_SETSECTORSTRUCT | LINE_NUMBER;
+
+                scriptWriteValue(label.lId);
+
+                C_GetNextVar();
                 continue;
             }
+
+        case CON_GETSECTOR:
+            {
+                intptr_t * const ins = &g_scriptPtr[-1];
+                int const labelNum = C_GetStructureIndexes(1, &h_sector);
+
+                if (labelNum == -1)
+                    continue;
+
+                Bassert((*ins & VM_INSTMASK) == CON_GETSECTOR);
+
+                auto const &label = SectorLabels[labelNum];
+
+                if (label.offset != -1 && (label.flags & LABEL_READFUNC) == 0)
+                    *ins = CON_GETSECTORSTRUCT | LINE_NUMBER;
+
+                scriptWriteValue(label.lId);
+
+                C_GetNextVarType(GAMEVAR_READONLY);
+                continue;
+            }
+
 
         case CON_FINDNEARACTOR3D:
         case CON_FINDNEARACTOR:
@@ -3431,33 +3426,92 @@ DO_DEFSTATE:
             }
 
         case CON_SETWALL:
-        case CON_GETWALL:
             {
+                intptr_t * const ins = &g_scriptPtr[-1];
                 int const labelNum = C_GetStructureIndexes(1, &h_wall);
 
                 if (labelNum == -1)
                     continue;
 
-                scriptWriteValue(WallLabels[labelNum].lId);
+                Bassert((*ins & VM_INSTMASK) == CON_SETWALL);
 
-                C_GetNextVarType((tw == CON_GETWALL) ? GAMEVAR_READONLY : 0);
+                auto const &label = WallLabels[labelNum];
+
+                if (label.offset != -1 && (label.flags & LABEL_WRITEFUNC) == 0)
+                    *ins = CON_SETWALLSTRUCT | LINE_NUMBER;
+
+                scriptWriteValue(label.lId);
+
+                C_GetNextVar();
+                continue;
+            }
+
+        case CON_GETWALL:
+            {
+                intptr_t * const ins = &g_scriptPtr[-1];
+                int const labelNum = C_GetStructureIndexes(1, &h_wall);
+
+                if (labelNum == -1)
+                    continue;
+
+                Bassert((*ins & VM_INSTMASK) == CON_GETWALL);
+
+                auto const &label = WallLabels[labelNum];
+
+                if (label.offset != -1 && (label.flags & LABEL_READFUNC) == 0)
+                    *ins = CON_GETWALLSTRUCT | LINE_NUMBER;
+
+                scriptWriteValue(label.lId);
+
+                C_GetNextVarType(GAMEVAR_READONLY);
                 continue;
             }
 
         case CON_SETPLAYER:
-        case CON_GETPLAYER:
             {
+                intptr_t * const ins = &g_scriptPtr[-1];
                 int const labelNum = C_GetStructureIndexes(1, &h_player);
 
                 if (labelNum == -1)
                     continue;
 
-                scriptWriteValue(PlayerLabels[labelNum].lId);
+                Bassert((*ins & VM_INSTMASK) == CON_SETPLAYER);
 
-                if (PlayerLabels[labelNum].flags & LABEL_HASPARM2)
+                auto const &label = PlayerLabels[labelNum];
+
+                if (label.offset != -1 && (label.flags & (LABEL_WRITEFUNC|LABEL_HASPARM2)) == 0)
+                    *ins = CON_SETPLAYERSTRUCT | LINE_NUMBER;
+
+                scriptWriteValue(label.lId);
+
+                if (label.flags & LABEL_HASPARM2)
                     C_GetNextVar();
 
-                C_GetNextVarType((tw == CON_GETPLAYER) ? GAMEVAR_READONLY : 0);
+                C_GetNextVar();
+                continue;
+            }
+
+        case CON_GETPLAYER:
+            {
+                intptr_t * const ins = &g_scriptPtr[-1];
+                int const labelNum = C_GetStructureIndexes(1, &h_player);
+
+                if (labelNum == -1)
+                    continue;
+
+                Bassert((*ins & VM_INSTMASK) == CON_GETPLAYER);
+
+                auto const &label = PlayerLabels[labelNum];
+
+                if (label.offset != -1 && (label.flags & (LABEL_READFUNC|LABEL_HASPARM2)) == 0)
+                    *ins = CON_GETPLAYERSTRUCT | LINE_NUMBER;
+
+                scriptWriteValue(label.lId);
+
+                if (label.flags & LABEL_HASPARM2)
+                    C_GetNextVar();
+
+                C_GetNextVarType(GAMEVAR_READONLY);
                 continue;
             }
 
@@ -5224,6 +5278,7 @@ repeatcase:
                 {
                     initprintf("%s:%d: warning: truncating volume name to %d characters.\n",
                         g_scriptFileName,g_lineNumber,(int32_t)sizeof(g_volumeNames[j])-1);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
@@ -5278,18 +5333,19 @@ repeatcase:
             {
                 gamefunctions[j][i] = *textptr;
                 textptr++,i++;
-                if (EDUKE32_PREDICT_FALSE(*textptr != 0x0a && *textptr != 0x0d && ispecial(*textptr)))
-                {
-                    initprintf("%s:%d: warning: invalid character in function name.\n",
-                        g_scriptFileName,g_lineNumber);
-                    g_warningCnt++;
-                    scriptSkipLine();
-                    break;
-                }
                 if (EDUKE32_PREDICT_FALSE(i >= MAXGAMEFUNCLEN))
                 {
                     initprintf("%s:%d: warning: truncating function name to %d characters.\n",
                         g_scriptFileName,g_lineNumber, MAXGAMEFUNCLEN-1);
+                    i--;
+                    g_warningCnt++;
+                    scriptSkipLine();
+                    break;
+                }
+                if (EDUKE32_PREDICT_FALSE(*textptr != 0x0a && *textptr != 0x0d && ispecial(*textptr)))
+                {
+                    initprintf("%s:%d: warning: invalid character in function name.\n",
+                        g_scriptFileName,g_lineNumber);
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
@@ -5349,10 +5405,18 @@ repeatcase:
                 {
                     initprintf("%s:%d: warning: truncating skill name to %d characters.\n",
                         g_scriptFileName,g_lineNumber,(int32_t)sizeof(g_skillNames[j])-1);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
                 }
+            }
+
+            if (EDUKE32_PREDICT_FALSE(i == 0))
+            {
+                initprintf("%s:%d: warning: empty skill name.\n",
+                    g_scriptFileName,g_lineNumber);
+                g_skillNames[j][i++] = ' ';
             }
 
             g_skillNames[j][i] = '\0';
@@ -5381,6 +5445,7 @@ repeatcase:
                     {
                         initprintf("%s:%d: warning: truncating game name to %d characters.\n",
                             g_scriptFileName,g_lineNumber,(int32_t)sizeof(gamename)-1);
+                        i--;
                         g_warningCnt++;
                         scriptSkipLine();
                         break;
@@ -5457,6 +5522,7 @@ repeatcase:
                 {
                     initprintf("%s:%d: warning: truncating gametype name to %d characters.\n",
                         g_scriptFileName,g_lineNumber,(int32_t)sizeof(g_gametypeNames[j])-1);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
@@ -5548,6 +5614,7 @@ repeatcase:
                 {
                     initprintf("%s:%d: warning: truncating level name to %d characters.\n",
                         g_scriptFileName,g_lineNumber,31);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
@@ -5569,6 +5636,7 @@ repeatcase:
 
         case CON_DEFINEQUOTE:
         case CON_REDEFINEQUOTE:
+
             if (tw == CON_DEFINEQUOTE)
             {
                 g_scriptPtr--;
@@ -5597,7 +5665,7 @@ repeatcase:
 
             scriptSkipSpaces();
 
-            if (tw == CON_REDEFINEQUOTE)
+            if (tw == CON_REDEFINEQUOTE && !g_switchCountPhase)
             {
                 if (apXStrings[g_numXStrings] == NULL)
                     apXStrings[g_numXStrings] = (char *)Xcalloc(MAXQUOTELEN,sizeof(uint8_t));
@@ -5614,29 +5682,37 @@ repeatcase:
                 break;
                 }
                 */
-                if (tw == CON_DEFINEQUOTE)
-                    *(apStrings[k]+i) = *textptr;
-                else
-                    *(apXStrings[g_numXStrings]+i) = *textptr;
+                if (!g_switchCountPhase)
+                {
+                    if (tw == CON_DEFINEQUOTE)
+                        *(apStrings[k]+i) = *textptr;
+                    else
+                        *(apXStrings[g_numXStrings]+i) = *textptr;
+                }
+
                 textptr++,i++;
                 if (EDUKE32_PREDICT_FALSE(i >= MAXQUOTELEN))
                 {
                     initprintf("%s:%d: warning: truncating quote text to %d characters.\n",g_scriptFileName,g_lineNumber,MAXQUOTELEN-1);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
                 }
             }
 
-            if (tw == CON_DEFINEQUOTE)
+            if (!g_switchCountPhase)
             {
-                if ((unsigned)k < MAXQUOTES)
-                    *(apStrings[k]+i) = '\0';
-            }
-            else
-            {
-                *(apXStrings[g_numXStrings]+i) = '\0';
-                scriptWriteValue(g_numXStrings++);
+                if (tw == CON_DEFINEQUOTE)
+                {
+                    if ((unsigned)k < MAXQUOTES)
+                        *(apStrings[k]+i) = '\0';
+                }
+                else
+                {
+                    *(apXStrings[g_numXStrings]+i) = '\0';
+                    scriptWriteValue(g_numXStrings++);
+                }
             }
             continue;
 
@@ -5668,6 +5744,7 @@ repeatcase:
                 if (EDUKE32_PREDICT_FALSE(i >= MAXCHEATDESC))
                 {
                     initprintf("%s:%d: warning: truncating cheat text to %d characters.\n",g_scriptFileName,g_lineNumber,MAXCHEATDESC-1);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
@@ -5727,6 +5804,7 @@ repeatcase:
                 {
                     initprintf("%s:%d: warning: truncating cheat string to %d characters.\n",
                         g_scriptFileName,g_lineNumber,(signed)sizeof(CheatStrings[k])-1);
+                    i--;
                     g_warningCnt++;
                     scriptSkipLine();
                     break;
@@ -5736,23 +5814,24 @@ repeatcase:
             continue;
 
         case CON_DEFINESOUND:
+        {
             g_scriptPtr--;
             C_GetNextValue(LABEL_DEFINE);
 
             // Ideally we could keep the value of i from C_GetNextValue() instead of having to hash_find() again.
             // This depends on tempbuf remaining in place after C_GetNextValue():
-            j = hash_find(&h_labels,tempbuf);
+            j = hash_find(&h_labels, tempbuf);
 
             k = g_scriptPtr[-1];
-            if (EDUKE32_PREDICT_FALSE((unsigned)k >= MAXSOUNDS-1))
+            if (EDUKE32_PREDICT_FALSE((unsigned)k >= MAXSOUNDS - 1))
             {
-                initprintf("%s:%d: error: sound index exceeds limit of %d.\n",g_scriptFileName,g_lineNumber, MAXSOUNDS-1);
+                initprintf("%s:%d: error: sound index exceeds limit of %d.\n", g_scriptFileName, g_lineNumber, MAXSOUNDS - 1);
                 g_errorCnt++;
-                k = MAXSOUNDS-1;
+                k = MAXSOUNDS - 1;
             }
             else if (EDUKE32_PREDICT_FALSE(g_sounds[k].filename != NULL))
             {
-                initprintf("%s:%d: warning: sound %d already defined (%s)\n",g_scriptFileName,g_lineNumber,k,g_sounds[k].filename);
+                initprintf("%s:%d: warning: sound %d already defined (%s)\n", g_scriptFileName, g_lineNumber, k, g_sounds[k].filename);
                 g_warningCnt++;
             }
 
@@ -5760,18 +5839,17 @@ repeatcase:
             i = 0;
             C_SkipComments();
 
-            if (g_sounds[k].filename == NULL)
-                g_sounds[k].filename = (char *)Xcalloc(BMAX_PATH,sizeof(uint8_t));
+            char filename[BMAX_PATH];
 
             if (*textptr == '\"')
             {
                 textptr++;
                 while (*textptr && *textptr != '\"')
                 {
-                    g_sounds[k].filename[i++] = *textptr++;
-                    if (EDUKE32_PREDICT_FALSE(i >= BMAX_PATH-1))
+                    filename[i++] = *textptr++;
+                    if (EDUKE32_PREDICT_FALSE(i >= BMAX_PATH - 1))
                     {
-                        initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n",g_scriptFileName,g_lineNumber,BMAX_PATH-1);
+                        initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n", g_scriptFileName, g_lineNumber, BMAX_PATH - 1);
                         g_errorCnt++;
                         C_SkipComments();
                         break;
@@ -5781,43 +5859,44 @@ repeatcase:
             }
             else while (*textptr != ' ' && *textptr != '\t' && *textptr != '\r' && *textptr != '\n')
             {
-                g_sounds[k].filename[i++] = *textptr++;
-                if (EDUKE32_PREDICT_FALSE(i >= BMAX_PATH-1))
+                filename[i++] = *textptr++;
+                if (EDUKE32_PREDICT_FALSE(i >= BMAX_PATH - 1))
                 {
-                    initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n",g_scriptFileName,g_lineNumber,BMAX_PATH-1);
+                    initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n", g_scriptFileName, g_lineNumber, BMAX_PATH - 1);
                     g_errorCnt++;
                     C_SkipComments();
                     break;
                 }
             }
-            g_sounds[k].filename[i] = '\0';
+            filename[i] = '\0';
 
-            check_filename_case(g_sounds[k].filename);
-
-            C_GetNextValue(LABEL_DEFINE);
-            g_sounds[k].ps = g_scriptPtr[-1];
-            C_GetNextValue(LABEL_DEFINE);
-            g_sounds[k].pe = g_scriptPtr[-1];
-            C_GetNextValue(LABEL_DEFINE);
-            g_sounds[k].pr = g_scriptPtr[-1];
+            check_filename_case(filename);
 
             C_GetNextValue(LABEL_DEFINE);
-            g_sounds[k].m = g_scriptPtr[-1] & ~SF_ONEINST_INTERNAL;
-            if (g_scriptPtr[-1] & SF_LOOP)
-                g_sounds[k].m |= SF_ONEINST_INTERNAL;
+            int minpitch = g_scriptPtr[-1];
+            C_GetNextValue(LABEL_DEFINE);
+            int maxpitch = g_scriptPtr[-1];
+            C_GetNextValue(LABEL_DEFINE);
+            int priority = g_scriptPtr[-1];
 
             C_GetNextValue(LABEL_DEFINE);
-            g_sounds[k].vo = g_scriptPtr[-1];
+            int type = g_scriptPtr[-1];
+
+            C_GetNextValue(LABEL_DEFINE);
+            int distance = g_scriptPtr[-1];
             g_scriptPtr -= 5;
 
-            g_sounds[k].volume = fix16_one;
+            float volume = 1.0;
+
+            S_DefineSound(k, filename, minpitch, maxpitch, priority, type, distance, volume);
 
             if (k > g_highestSoundIdx)
                 g_highestSoundIdx = k;
 
             if (g_dynamicSoundMapping && j >= 0 && (labeltype[j] & LABEL_DEFINE))
-                G_ProcessDynamicSoundMapping(label+(j<<6), k);
+                G_ProcessDynamicSoundMapping(label + (j << 6), k);
             continue;
+        }
 
         case CON_ENDEVENT:
 
@@ -6046,7 +6125,6 @@ static void C_AddDefinition(const char *lLabel,int32_t lValue,int32_t lType)
     labelcode[g_labelCnt++] = lValue;
 }
 
-// KEEPINSYNC lunatic/con_lang.lua
 static void C_AddDefaultDefinitions(void)
 {
     for (int i=0; i<MAXEVENTS; i++)
@@ -6171,6 +6249,7 @@ static void C_AddDefaultDefinitions(void)
         { "STR_MAPNAME",         STR_MAPNAME },
         { "STR_PARTIME",         STR_PARTIME },
         { "STR_PLAYERNAME",      STR_PLAYERNAME },
+        { "STR_REVISION",        STR_REVISION },
         { "STR_USERMAPFILENAME", STR_USERMAPFILENAME },
         { "STR_VERSION",         STR_VERSION },
         { "STR_VOLUMENAME",      STR_VOLUMENAME },
@@ -6182,7 +6261,6 @@ static void C_AddDefaultDefinitions(void)
 
     C_AddDefinition("NO", 0, LABEL_DEFINE | LABEL_ACTION | LABEL_AI | LABEL_MOVE);
 }
-#endif
 
 void C_InitProjectiles(void)
 {
@@ -6217,7 +6295,6 @@ void C_InitProjectiles(void)
     }
 }
 
-#if !defined LUNATIC
 static char const * C_ScriptVersionString(int32_t version)
 {
 #ifdef EDUKE32_STANDALONE
@@ -6240,9 +6317,7 @@ static char const * C_ScriptVersionString(int32_t version)
 
 void C_PrintStats(void)
 {
-    initprintf("%d/%d labels, %d/%d variables, %d/%d arrays\n", g_labelCnt,
-        (int32_t) min((MAXSECTORS * sizeof(sectortype)/sizeof(int32_t)),
-            MAXSPRITES * sizeof(spritetype)/(1<<6)),
+    initprintf("%d/%d labels, %d/%d variables, %d/%d arrays\n", g_labelCnt, MAXLABELS,
         g_gameVarCount, MAXGAMEVARS, g_gameArrayCount, MAXGAMEARRAYS);
 
     int cnt = g_numXStrings;
@@ -6287,7 +6362,6 @@ void scriptInitTables()
     for (auto &varvar : varvartable)
         inthash_add(&h_varvar, varvar.x, varvar.y, 0);
 
-#ifdef CON_DISCRETE_VAR_ACCESS
     for (auto &globalvar : globalvartable)
         inthash_add(&h_globalvar, globalvar.x, globalvar.y, 0);
 
@@ -6296,8 +6370,22 @@ void scriptInitTables()
 
     for (auto &actorvar : actorvartable)
         inthash_add(&h_actorvar, actorvar.x, actorvar.y, 0);
-#endif
 }
+
+#if MICROPROFILE_ENABLED != 0
+static int C_GetLabelIndex(int32_t val, int type)
+{
+    for (int i=0;i<g_labelCnt;i++)
+        if (labelcode[i] == val && (labeltype[i] & type) != 0)
+            return i;
+
+    for (int i=0;i<g_labelCnt;i++)
+        if (labelcode[i] == val)
+            return i;
+
+    return -1;
+}
+#endif
 
 void C_Compile(const char *fileName)
 {
@@ -6306,9 +6394,6 @@ void C_Compile(const char *fileName)
 
     for (auto & i : g_tile)
         Bmemset(&i, 0, sizeof(tiledata_t));
-
-    for (double & actorMinMs : g_actorMinMs)
-        actorMinMs = 1e308;
 
     scriptInitTables();
     VM_InitHashTables();
@@ -6356,9 +6441,6 @@ void C_Compile(const char *fileName)
     kread(kFile, (char *)textptr, kFileLen);
     kclose(kFile);
 
-    g_scriptcrc = Bcrc32(NULL, 0, 0L);
-    g_scriptcrc = Bcrc32(textptr, kFileLen, g_scriptcrc);
-
     Xfree(apScript);
 
     apScript = (intptr_t *)Xcalloc(1, g_scriptSize * sizeof(intptr_t));
@@ -6379,7 +6461,7 @@ void C_Compile(const char *fileName)
     for (char * m : g_scriptModules)
     {
         C_Include(m);
-        free(m);
+        Bfree(m);
     }
     g_scriptModules.clear();
 
@@ -6439,6 +6521,45 @@ void C_Compile(const char *fileName)
         C_PrintStats();
 
     C_InitQuotes();
+
+#if MICROPROFILE_ENABLED != 0
+    for (int i=0; i<MAXEVENTS; i++)
+    {
+        if (VM_HaveEvent(i))
+        {
+            g_eventTokens[i]        = MicroProfileGetToken("CON VM Events", EventNames[i], MP_AUTO, MicroProfileTokenTypeCpu);
+            g_eventCounterTokens[i] = MicroProfileGetCounterToken(EventNames[i]);
+        }
+    }
+
+#if 0
+    for (int i=0; i<CON_END; i++)
+    {
+        Bassert(VM_GetKeywordForID(i) != nullptr);
+        g_instTokens[i] = MicroProfileGetToken("CON VM Instructions", VM_GetKeywordForID(i), MP_AUTO, MicroProfileTokenTypeCpu);
+    }
+#endif
+
+    for (int i=0; i<MAXTILES; i++)
+    {
+        if (G_TileHasActor(i))
+        {
+            int const index = C_GetLabelIndex(i, LABEL_ACTOR);
+
+            if (index != -1)
+                Bsprintf(tempbuf,"%s (%d)", label+(index<<6), i);
+            else Bsprintf(tempbuf,"unnamed (%d)", i);
+
+            g_actorTokens[i] = MicroProfileGetToken("CON VM Actors", tempbuf, MP_AUTO, MicroProfileTokenTypeCpu);
+        }
+    }
+
+    for (int i=0; i<MAXSTATUS; i++)
+    {
+        Bsprintf(tempbuf,"statnum%d", i);
+        g_statnumTokens[i] = MicroProfileGetToken("CON VM Actors", tempbuf, MP_AUTO, MicroProfileTokenTypeCpu);
+    }
+#endif
 }
 
 void C_ReportError(int error)
@@ -6509,6 +6630,9 @@ void C_ReportError(int error)
     case ERROR_VARTYPEMISMATCH:
         initprintf("%s:%d: error: variable `%s' is of the wrong type.\n",g_scriptFileName,g_lineNumber,LAST_LABEL);
         break;
+    case ERROR_TOOMANYLABELS:
+        initprintf("%s:%d: error: too many labels defined! Maximum is %d\n.",g_scriptFileName,g_lineNumber, MAXLABELS);
+        break;
     case WARNING_BADGAMEVAR:
         initprintf("%s:%d: warning: variable `%s' should be either per-player OR per-actor, not both.\n",g_scriptFileName,g_lineNumber,LAST_LABEL);
         break;
@@ -6535,4 +6659,3 @@ void C_ReportError(int error)
         break;
     }
 }
-#endif

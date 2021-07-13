@@ -31,10 +31,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "savegame.h"
 #include "sbar.h"
 
-#ifdef LUNATIC
-# include "lunatic_game.h"
-#endif
-
 #ifdef EDUKE32_TOUCH_DEVICES
 #include "in_android.h"
 #endif
@@ -387,6 +383,7 @@ static int osdcmd_noclip(osdcmdptr_t UNUSED(parm))
 static int osdcmd_restartsound(osdcmdptr_t UNUSED(parm))
 {
     UNREFERENCED_CONST_PARAMETER(parm);
+
     S_SoundShutdown();
     S_MusicShutdown();
 
@@ -502,11 +499,6 @@ static int osdcmd_vidmode(osdcmdptr_t parm)
     return OSDCMD_OK;
 }
 
-#ifdef LUNATIC
-// Returns: INT32_MIN if no such CON label, its value else.
-LUNATIC_CB int32_t (*El_GetLabelValue)(const char *label);
-#endif
-
 static int osdcmd_spawn(osdcmdptr_t parm)
 {
     int32_t picnum = 0;
@@ -549,14 +541,7 @@ static int osdcmd_spawn(osdcmdptr_t parm)
         }
         else
         {
-            int32_t i;
-#ifdef LUNATIC
-            i = g_labelCnt;
-            picnum = El_GetLabelValue(parm->parms[0]);
-            if (picnum != INT32_MIN)
-                i = !i;
-#else
-            int32_t j;
+            int32_t i, j;
 
             for (j=0; j<2; j++)
             {
@@ -573,7 +558,6 @@ static int osdcmd_spawn(osdcmdptr_t parm)
                 if (i < g_labelCnt)
                     break;
             }
-#endif
             if (i==g_labelCnt)
             {
                 OSD_Printf("spawn: Invalid tile label given\n");
@@ -608,7 +592,6 @@ static int osdcmd_spawn(osdcmdptr_t parm)
     return OSDCMD_OK;
 }
 
-#if !defined LUNATIC
 static int osdcmd_setvar(osdcmdptr_t parm)
 {
     if (numplayers > 1)
@@ -701,40 +684,6 @@ static int osdcmd_setactorvar(osdcmdptr_t parm)
 
     return OSDCMD_OK;
 }
-#else
-static int osdcmd_lua(osdcmdptr_t parm)
-{
-    // Should be used like
-    // lua "lua code..."
-    // (the quotes making the whole string passed as one argument)
-
-    int32_t ret;
-
-    if (parm->numparms != 1)
-        return OSDCMD_SHOWHELP;
-
-    if (!L_IsInitialized(&g_ElState))
-    {
-        OSD_Printf("Lua state is not initialized.\n");
-        return OSDCMD_OK;
-    }
-
-    // TODO: "=<expr>" as shorthand for "print(<expr>)", like in the
-    //  stand-alone Lua interpreter?
-    // TODO: reserve some table to explicitly store stuff on the top level, for
-    //  debugging convenience?
-
-    // For the 'lua' OSD command, don't make errors appear on-screen:
-    el_addNewErrors = 0;
-    ret = L_RunString(&g_ElState, parm->parms[0], -1, "console");
-    el_addNewErrors = 1;
-
-    if (ret != 0)
-        OSD_Printf("Error running the Lua code (error code %d)\n", ret);
-
-    return OSDCMD_OK;
-}
-#endif
 
 static int osdcmd_addpath(osdcmdptr_t parm)
 {
@@ -867,11 +816,11 @@ void onvideomodechange(int32_t newmode)
 
         while (i < MAXSPRITES)
         {
-            if (actor[i].lightptr)
+            if (practor[i].lightptr)
             {
-                polymer_deletelight(actor[i].lightId);
-                actor[i].lightptr = NULL;
-                actor[i].lightId = -1;
+                polymer_deletelight(practor[i].lightId);
+                practor[i].lightptr = NULL;
+                practor[i].lightId = -1;
             }
             i++;
         }
@@ -1380,78 +1329,14 @@ static int osdcmd_purgesaves(osdcmdptr_t UNUSED(parm))
     return OSDCMD_OK;
 }
 
-static int osdcmd_printtimes(osdcmdptr_t UNUSED(parm))
-{
-    UNREFERENCED_CONST_PARAMETER(parm);
-
-    char buf[32];
-    int32_t maxlen = 0;
-    int32_t haveev=0, haveac=0;
-    static char const s_event_[] = "EVENT_";
-    int constexpr strlen_event_  = ARRAY_SIZE(s_event_) - 1;
-
-    for (auto & EventName : EventNames)
-    {
-        int const len = Bstrlen(EventName+strlen_event_);
-        Bassert(len < ARRAY_SSIZE(buf));
-        maxlen = max(len, maxlen);
-    }
-
-    for (int i=0; i<MAXEVENTS; i++)
-        if (g_eventCalls[i])
-        {
-            int32_t n=Bsprintf(buf, "%s", EventNames[i]+strlen_event_);
-
-            if (!haveev)
-            {
-                haveev = 1;
-                OSD_Printf("\nevent times: event, total calls, total time [ms], mean time/call [us]\n");
-            }
-
-            buf[n] = 0;
-
-            OSD_Printf("%17s, %8d, %10.3f, %10.3f,\n",
-                buf, g_eventCalls[i], g_eventTotalMs[i],
-                1000*g_eventTotalMs[i]/g_eventCalls[i]);
-        }
-
-    for (int i=0; i<MAXTILES; i++)
-        if (g_actorCalls[i])
-        {
-            if (!haveac)
-            {
-                haveac = 1;
-                OSD_Printf("\nactor times: tile, total calls, total time [ms], {min,mean,max} time/call [us]\n");
-            }
-
-            buf[0] = 0;
-
-            for (int ii=0; ii<g_labelCnt; ii++)
-            {
-                if (labelcode[ii] == i && labeltype[ii] & LABEL_ACTOR)
-                {
-                    Bstrcpy(buf, label+(ii<<6));
-                    break;
-                }
-            }
-
-            if (!buf[0]) Bsprintf(buf, "%d", i);
-
-            OSD_Printf("%17s, %8d, %9.3f, %9.3f, %9.3f, %9.3f,\n",
-                buf, g_actorCalls[i], g_actorTotalMs[i],
-                1000*g_actorMinMs[i],
-                1000*g_actorTotalMs[i]/g_actorCalls[i],
-                1000*g_actorMaxMs[i]);
-        }
-
-    return OSDCMD_OK;
-}
-
 static int osdcmd_cvar_set_game(osdcmdptr_t parm)
 {
+    static char const prefix_snd[] = "snd_";
+    static char const prefix_mus[] = "mus_";
+
     int const r = osdcmd_cvar_set(parm);
 
-    if (r != OSDCMD_OK) return r;
+    if (r != OSDCMD_OK || parm->numparms < 1) return r;
 
     if (!Bstrcasecmp(parm->name, "r_upscalefactor"))
     {
@@ -1488,6 +1373,55 @@ static int osdcmd_cvar_set_game(osdcmdptr_t parm)
     else if (!Bstrcasecmp(parm->name, "vid_brightness") || !Bstrcasecmp(parm->name, "vid_contrast"))
     {
         videoSetPalette(ud.brightness>>2,g_player[myconnectindex].ps->palette,0);
+    }
+    else if (!Bstrcasecmp(parm->name, "snd_enabled") || !Bstrcasecmp(parm->name, "snd_numvoices"))
+    {
+        if (!FX_WarmedUp())
+            return r;
+
+        S_SoundShutdown();
+        S_SoundStartup();
+
+        S_ClearSoundLocks();
+    }
+    else if (!Bstrncasecmp(parm->name, prefix_snd, ARRAY_SIZE(prefix_snd)-1))
+    {
+        if (!FX_WarmedUp())
+            return r;
+
+        if (ASS_MIDISoundDriver == ASS_OPL3 || ASS_MIDISoundDriver == ASS_SF2 || MusicIsWaveform)
+        {
+            // music that we generate and send through sound
+
+            S_MusicShutdown();
+            S_SoundShutdown();
+
+            S_SoundStartup();
+            S_MusicStartup();
+
+            S_ClearSoundLocks();
+
+            if (ud.config.MusicToggle)
+                S_RestartMusic();
+        }
+        else
+        {
+            S_SoundShutdown();
+            S_SoundStartup();
+
+            S_ClearSoundLocks();
+        }
+    }
+    else if (!Bstrncasecmp(parm->name, prefix_mus, ARRAY_SIZE(prefix_mus)-1))
+    {
+        if (!MUSIC_WarmedUp())
+            return r;
+
+        S_MusicShutdown();
+        S_MusicStartup();
+
+        if (ud.config.MusicToggle)
+            S_RestartMusic();
     }
     else if (!Bstrcasecmp(parm->name, "hud_scale")
              || !Bstrcasecmp(parm->name, "hud_statusbarmode")
@@ -1669,6 +1603,21 @@ int32_t registerosdcommands(void)
         { "hud_hidestick", "hide the touch input stick", (void *)&droidinput.hideStick, CVAR_BOOL, 0, 1 },
 #endif
 
+        {
+            "in_joystickaimweight", "weight joystick aiming input towards whichever axis is moving the most at any given time",
+            (void *)&ud.config.JoystickAimWeight, CVAR_INT, 0, 10
+        },
+
+        {
+            "in_joystickviewcentering", "automatically center the player's view vertically when moving while using a controller",
+            (void *)&ud.config.JoystickViewCentering, CVAR_INT, 0, 10
+        },
+
+        {
+            "in_joystickviewleveling", "automatically adjusts the player's view vertically to aim at enemies",
+            (void *)&ud.config.JoystickAimAssist, CVAR_BOOL, 0, 1
+        },
+
         { "in_joystick","use joystick or controller input" CVAR_BOOL_OPTSTR,(void *)&ud.setup.usejoystick, CVAR_BOOL|CVAR_FUNCPTR, 0, 1 },
         { "in_mouse","use mouse input" CVAR_BOOL_OPTSTR,(void *)&ud.setup.usemouse, CVAR_BOOL|CVAR_FUNCPTR, 0, 1 },
 
@@ -1676,17 +1625,17 @@ int32_t registerosdcommands(void)
         { "in_mousemode", "DEPRECATED: vertical mouse aiming" CVAR_BOOL_OPTSTR, (void *)&g_myAimMode, CVAR_BOOL, 0, 1 },
 
         {
-            "in_mousebias", "emulates the original mouse code's weighting of input towards whichever axis is moving the most at any given time",
+            "in_mousebias", "DEPRECATED: emulates the original mouse code's weighting of input towards whichever axis is moving the most at any given time",
             (void *)&ud.config.MouseBias, CVAR_INT, 0, 32
         },
 
         { "in_mouseflip", "invert vertical mouse movement" CVAR_BOOL_OPTSTR, (void *)&ud.mouseflip, CVAR_BOOL, 0, 1 },
 
-        { "in_mousexscale", "scale modifier for mouse x axis", (void *)&CONTROL_MouseAxesScale[0], CVAR_INT, 1, 65536 },
-        { "in_mouseyscale", "scale modifier for mouse y axis", (void *)&CONTROL_MouseAxesScale[1], CVAR_INT, 1, 65536 },
+        { "in_mousexscale", "scale modifier for mouse x axis", (void *)&CONTROL_MouseAxesScale[0], CVAR_INT, 0, 65536 },
+        { "in_mouseyscale", "scale modifier for mouse y axis", (void *)&CONTROL_MouseAxesScale[1], CVAR_INT, 0, 65536 },
 
-        { "mus_enabled", "music subsystem" CVAR_BOOL_OPTSTR, (void *)&ud.config.MusicToggle, CVAR_BOOL, 0, 1 },
-        { "mus_device", "music device", (void*)& ud.config.MusicDevice, CVAR_INT, 0, ASS_NumSoundCards },
+        { "mus_enabled", "music subsystem" CVAR_BOOL_OPTSTR, (void *)&ud.config.MusicToggle, CVAR_BOOL|CVAR_FUNCPTR, 0, 1 },
+        { "mus_device", "music device", (void*)& ud.config.MusicDevice, CVAR_INT|CVAR_FUNCPTR, 0, ASS_NumSoundCards },
         { "mus_volume", "controls music volume", (void *)&ud.config.MusicVolume, CVAR_INT, 0, 255 },
 
         { "osdhightile", "use content pack assets for console text if available" CVAR_BOOL_OPTSTR, (void *)&osdhightile, CVAR_BOOL, 0, 1 },
@@ -1709,11 +1658,11 @@ int32_t registerosdcommands(void)
         { "skill","changes the game skill setting", (void *)&ud.m_player_skill, CVAR_INT|CVAR_FUNCPTR|CVAR_NOSAVE/*|CVAR_NOMULTI*/, 0, 5 },
 
         { "snd_ambience", "ambient sounds" CVAR_BOOL_OPTSTR, (void *)&ud.config.AmbienceToggle, CVAR_BOOL, 0, 1 },
-        { "snd_enabled", "sound effects" CVAR_BOOL_OPTSTR, (void *)&ud.config.SoundToggle, CVAR_BOOL, 0, 1 },
+        { "snd_enabled", "sound effects" CVAR_BOOL_OPTSTR, (void *)&ud.config.SoundToggle, CVAR_BOOL|CVAR_FUNCPTR, 0, 1 },
         { "snd_fxvolume", "volume of sound effects", (void *)&ud.config.FXVolume, CVAR_INT, 0, 255 },
-        { "snd_mixrate", "sound mixing rate", (void *)&ud.config.MixRate, CVAR_INT, 0, 48000 },
-        { "snd_numchannels", "the number of sound channels", (void *)&ud.config.NumChannels, CVAR_INT, 0, 2 },
-        { "snd_numvoices", "the number of concurrent sounds", (void *)&ud.config.NumVoices, CVAR_INT, 1, MAXVOICES },
+        { "snd_mixrate", "sound mixing rate", (void *)&ud.config.MixRate, CVAR_INT|CVAR_FUNCPTR, 0, 48000 },
+        { "snd_numchannels", "the number of sound channels", (void *)&ud.config.NumChannels, CVAR_INT|CVAR_FUNCPTR, 0, 2 },
+        { "snd_numvoices", "the number of concurrent sounds", (void *)&ud.config.NumVoices, CVAR_INT|CVAR_FUNCPTR, 1, MAXVOICES },
 #ifdef ASS_REVERSESTEREO
         { "snd_reversestereo", "reverses the stereo channels", (void *)&ud.config.ReverseStereo, CVAR_BOOL, 0, 1 },
 #endif
@@ -1730,10 +1679,6 @@ int32_t registerosdcommands(void)
         { "touch_sens_look_y", "touch input sensitivity for looking up/down", (void *) &droidinput.pitch_sens, CVAR_FLOAT, 1, 9 },
         { "touch_invert", "invert look up/down touch input", (void *) &droidinput.invertLook, CVAR_BOOL, 0, 1 },
 #endif
-
-        { "vid_gamma","gamma component of gamma ramp",(void *)&g_videoGamma, CVAR_FLOAT|CVAR_FUNCPTR, 0, 10 },
-        { "vid_contrast","contrast component of gamma ramp",(void *)&g_videoContrast, CVAR_FLOAT|CVAR_FUNCPTR, 0, 10 },
-        { "vid_brightness","brightness component of gamma ramp",(void *)&g_videoBrightness, CVAR_FLOAT|CVAR_FUNCPTR, 0, 10 },
         { "wchoice","weapon priority for automatically switching on empty or pickup", (void *)ud.wchoice, CVAR_STRING|CVAR_FUNCPTR, 0, MAX_WEAPONS },
     };
 
@@ -1813,9 +1758,6 @@ int32_t registerosdcommands(void)
 
     OSD_RegisterFunction("noclip","noclip: toggles clipping mode", osdcmd_noclip);
 
-
-    OSD_RegisterFunction("printtimes", "printtimes: prints VM timing statistics", osdcmd_printtimes);
-
     OSD_RegisterFunction("purgesaves", "purgesaves: deletes obsolete and unreadable save files", osdcmd_purgesaves);
 
     OSD_RegisterFunction("quicksave","quicksave: performs a quick save", osdcmd_quicksave);
@@ -1826,14 +1768,10 @@ int32_t registerosdcommands(void)
     OSD_RegisterFunction("restartmap", "restartmap: restarts the current map", osdcmd_restartmap);
     OSD_RegisterFunction("restartsound","restartsound: reinitializes the sound system",osdcmd_restartsound);
     OSD_RegisterFunction("restartvid","restartvid: reinitializes the video mode",osdcmd_restartvid);
-#if !defined LUNATIC
     OSD_RegisterFunction("addlogvar","addlogvar <gamevar>: prints the value of a gamevar", osdcmd_addlogvar);
     OSD_RegisterFunction("setvar","setvar <gamevar> <value>: sets the value of a gamevar", osdcmd_setvar);
     OSD_RegisterFunction("setvarvar","setvarvar <gamevar1> <gamevar2>: sets the value of <gamevar1> to <gamevar2>", osdcmd_setvar);
     OSD_RegisterFunction("setactorvar","setactorvar <actor#> <gamevar> <value>: sets the value of <actor#>'s <gamevar> to <value>", osdcmd_setactorvar);
-#else
-    OSD_RegisterFunction("lua", "lua \"Lua code...\": runs Lunatic code", osdcmd_lua);
-#endif
     OSD_RegisterFunction("screenshot","screenshot [format]: takes a screenshot.", osdcmd_screenshot);
 
     OSD_RegisterFunction("spawn","spawn <picnum> [palnum] [cstat] [ang] [x y z]: spawns a sprite with the given properties",osdcmd_spawn);

@@ -13,6 +13,7 @@
 
 #include "cache1d.h"
 #include "vfs.h"
+#include "xxhash.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,11 +31,7 @@ extern "C" {
 
 extern uint8_t curbasepal;
 
-#ifdef LUNATIC
-extern const char *(paletteGetBlendTable) (int32_t blend);
-#else
 #define paletteGetBlendTable(blend) (blendtable[blend])
-#endif
 
 extern uint8_t PaletteIndexFullbrights[32];
 #define IsPaletteIndexFullbright(col) (PaletteIndexFullbrights[(col)>>3] & (1u<<((col)&7)))
@@ -66,7 +63,7 @@ extern float frealmaxshade;
 
 extern int32_t globalpal;
 extern int32_t globalblend;
-extern uint32_t g_lastpalettesum;
+extern XXH64_hash_t g_lastpalettesum;
 extern palette_t paletteGetColor(int32_t col);
 extern void paletteLoadFromDisk(void);
 extern void palettePostLoadTables(void);

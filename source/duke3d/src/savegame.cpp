@@ -24,16 +24,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "premap.h"
 #include "prlights.h"
 #include "savegame.h"
-#ifdef LUNATIC
-# include "lunatic_game.h"
-static int32_t g_savedOK;
-const char *g_failedVarname;
-#endif
 
 #include "vfs.h"
 
 static OutputFileCounter savecounter;
-char previousboardfilename[BMAX_PATH];
 
 // For storing pointers in files.
 //  back_p==0: ptr -> "small int"
@@ -123,7 +117,7 @@ void G_ResetInterpolations(void)
         case SE_14_SUBWAY_CAR:
         case SE_15_SLIDING_DOOR:
         case SE_16_REACTOR:
-        case SE_26:
+        case SE_26_ESCALATOR:
         case SE_30_TWO_WAY_TRAIN:
             Sect_SetInterpolation(sprite[k].sectnum);
             break;
@@ -473,8 +467,10 @@ int32_t G_LoadPlayer(savebrief_t & sv)
             {
                 // only setup art if map differs from previous
                 if (!previousboardfilename[0] || Bstrcmp(previousboardfilename, currentboardfilename))
+                {
                     artSetupMapArt(currentboardfilename);
-                Bstrcpy(previousboardfilename, currentboardfilename);
+                    Bstrcpy(previousboardfilename, currentboardfilename);
+                }
                 append_ext_UNSAFE(currentboardfilename, ".mhk");
                 engineLoadMHK(currentboardfilename);
             }
@@ -510,11 +506,9 @@ int32_t G_LoadPlayer(savebrief_t & sv)
 
             Menu_Close(0);
 
-#if !defined LUNATIC
             Gv_ResetVars();
             Gv_InitWeaponPointers();
             Gv_RefreshPointers();
-#endif
             Gv_ResetSystemDefaults();
 
             for (int i=0; i < (MAXVOLUMES*MAXLEVELS); i++)
@@ -657,10 +651,10 @@ int32_t G_LoadPlayer(savebrief_t & sv)
     ud.m_level_number = h.levnum;
     ud.m_player_skill = h.skill;
 
-    // NOTE: Bmemcpy needed for SAVEGAME_MUSIC.
-    EDUKE32_STATIC_ASSERT(sizeof(boardfilename) == sizeof(h.boardfn));
-    different_user_map = Bstrcmp(boardfilename, h.boardfn);
-    Bmemcpy(boardfilename, h.boardfn, sizeof(boardfilename));
+    EDUKE32_STATIC_ASSERT(sizeof(h.boardfn) < sizeof(boardfilename));
+    different_user_map = Bstrncmp(boardfilename, h.boardfn, sizeof(h.boardfn));
+    // NOTE: size arg is (unconventionally) that of the source, it being smaller.
+    Bstrncpyz(boardfilename, h.boardfn, sizeof(h.boardfn) /*!*/);
 
     int const mapIdx = h.volnum*MAXLEVELS + h.levnum;
 
@@ -673,8 +667,10 @@ int32_t G_LoadPlayer(savebrief_t & sv)
     {
         // only setup art if map differs from previous
         if (!previousboardfilename[0] || Bstrcmp(previousboardfilename, currentboardfilename))
+        {
             artSetupMapArt(currentboardfilename);
-        Bstrcpy(previousboardfilename, currentboardfilename);
+            Bstrcpy(previousboardfilename, currentboardfilename);
+        }
         append_ext_UNSAFE(currentboardfilename, ".mhk");
         engineLoadMHK(currentboardfilename);
     }
@@ -838,12 +834,7 @@ int32_t G_SavePlayer(savebrief_t & sv, bool isAutoSave)
     if (!g_netServer && ud.multimode < 2)
     {
         OSD_Printf("Saved: %s\n", fn);
-#ifdef LUNATIC
-        if (!g_savedOK)
-            Bstrcpy(apStrings[QUOTE_RESERVED4], "^10Failed Saving Game");
-        else
-#endif
-            Bstrcpy(apStrings[QUOTE_RESERVED4], "Game Saved");
+        Bstrcpy(apStrings[QUOTE_RESERVED4], "Game Saved");
         P_DoQuote(QUOTE_RESERVED4, g_player[myconnectindex].ps);
     }
 
@@ -1177,7 +1168,7 @@ static int32_t getnumvar(const dataspec_t *spec)
 {
     int n = 0;
     for (; spec->flags != DS_END; spec++)
-        if (spec->flags & (DS_STRING|DS_CMP|DS_NOCHK|DS_SAVEFN|DS_LOADFN))
+        if (!(spec->flags & (DS_STRING|DS_CMP|DS_NOCHK|DS_SAVEFN|DS_LOADFN)))
             ++n;
     return n;
 }
@@ -1363,26 +1354,12 @@ static uint32_t calcsz(const dataspec_t *spec)
 static void sv_prespriteextsave();
 static void sv_postspriteext();
 #endif
-#if defined LUNATIC
-// Recreate Lua state.
-// XXX: It may matter a great deal when this is run from if the Lua code refers
-// to C-side data at file scope. Such usage is strongly discouraged though.
-static void sv_create_lua_state(void)
-{
-    El_CreateGameState();
-    G_PostCreateGameState();
-}
-#endif
+static void sv_prelabelsave();
+static void sv_prelabelload();
+static void sv_preactorsave();
 static void sv_postactordata();
 static void sv_preanimateptrsave();
 static void sv_postanimateptr();
-static void sv_prequote();
-static void sv_quotesave();
-static void sv_quoteload();
-static void sv_prequoteredef();
-static void sv_quoteredefsave();
-static void sv_quoteredefload();
-static void sv_postquoteredef();
 static void sv_restsave();
 static void sv_restload();
 static void sv_preprojectilesave();
@@ -1391,16 +1368,16 @@ static void sv_preprojectileload();
 static void sv_postprojectileload();
 
 static projectile_t *savegame_projectiledata;
-static uint8_t       savegame_projectiles[MAXTILES >> 3];
+static uint8_t       savegame_projectiles[(MAXTILES + 7) >> 3];
 static int32_t       savegame_projectilecnt = 0;
+
+static int32_t savegame_labelcnt;
+static char *savegame_labels;
 
 #define SVARDATALEN \
     ((sizeof(g_player[0].user_name)+sizeof(g_player[0].pcolor)+sizeof(g_player[0].pteam) \
       +sizeof(g_player[0].frags)+sizeof(DukePlayer_t))*MAXPLAYERS)
 
-static uint8_t savegame_quotedef[MAXQUOTES >> 3];
-static char (*savegame_quotes)[MAXQUOTELEN];
-static char (*savegame_quoteredefs)[MAXQUOTELEN];
 static uint8_t savegame_restdata[SVARDATALEN];
 
 static char svgm_udnetw_string [] = "blK:udnt";
@@ -1440,11 +1417,6 @@ static const dataspec_t svgm_udnetw[] =
     { 0, connectpoint2, sizeof(connectpoint2), 1 },
     { 0, &randomseed, sizeof(randomseed), 1 },
     { 0, &g_globalRandom, sizeof(g_globalRandom), 1 },
-#ifdef LUNATIC
-    // Save game tic count for Lunatic because it is exposed to userland. See
-    // test/helixspawner.lua for an example.
-    { 0, &g_moveThingsCount, sizeof(g_moveThingsCount), 1 },
-#endif
 //    { 0, &lockclock_dummy, sizeof(lockclock), 1 },
     { DS_END, 0, 0, 0 }
 };
@@ -1483,7 +1455,7 @@ static const dataspec_t svgm_secwsp[] =
 #ifdef USE_OPENGL
     { DS_SAVEFN, (void *)&sv_prespriteextsave, 0, 1 },
 #endif
-    { DS_MAINAR, &spriteext, sizeof(spriteext_t), MAXSPRITES },
+    { DS_MAINAR, &spriteext, sizeof(spriteext_t), MAXSPRITES+MAXUNIQHUDID },
 #ifndef NEW_MAP_FORMAT
     { DS_MAINAR, &wallext, sizeof(wallext_t), MAXWALLS },
 #endif
@@ -1507,22 +1479,23 @@ static char svgm_script_string [] = "blK:scri";
 static const dataspec_t svgm_script[] =
 {
     { DS_STRING, (void *)svgm_script_string, 0, 1 },
+    { DS_NOCHK|DS_SAVEFN, (void *) &sv_prelabelsave, 0, 1 },
+    { DS_NOCHK, &savegame_labelcnt, sizeof(savegame_labelcnt), 1},
+    { DS_NOCHK|DS_LOADFN, (void *) &sv_prelabelload, 0, 1 },
+    { DS_NOCHK|DS_DYNAMIC|DS_CNT(savegame_labelcnt), &savegame_labels, 1<<6, (intptr_t)&savegame_labelcnt },
     { DS_SAVEFN, (void *) &sv_preprojectilesave, 0, 1 },
-    { 0, savegame_projectiles, sizeof(uint8_t), MAXTILES >> 3 },
+    { 0, savegame_projectiles, sizeof(uint8_t), (MAXTILES + 7) >> 3 },
     { DS_LOADFN, (void *) &sv_preprojectileload, 0, 1 },
     { DS_DYNAMIC|DS_CNT(savegame_projectilecnt), &savegame_projectiledata, sizeof(projectile_t), (intptr_t)&savegame_projectilecnt },
     { DS_SAVEFN, (void *) &sv_postprojectilesave, 0, 1 },
     { DS_LOADFN, (void *) &sv_postprojectileload, 0, 1 },
+    { DS_NOCHK|DS_SAVEFN, (void *) &sv_preactorsave, 0, 1 },
     { 0, &actor[0], sizeof(actor_t), MAXSPRITES },
-    { DS_SAVEFN|DS_LOADFN, (void *)&sv_postactordata, 0, 1 },
-#if defined LUNATIC
-    { DS_LOADFN|DS_NOCHK, (void *)&sv_create_lua_state, 0, 1 },
-#endif
+    { DS_NOCHK|DS_SAVEFN|DS_LOADFN, (void *)&sv_postactordata, 0, 1 },
     { DS_END, 0, 0, 0 }
 };
 
 static char svgm_anmisc_string [] = "blK:anms";
-static char svgm_end_string [] = "savegame_end";
 
 static const dataspec_t svgm_anmisc[] =
 {
@@ -1547,31 +1520,14 @@ static const dataspec_t svgm_anmisc[] =
     { 0, &g_pskyidx, sizeof(g_pskyidx), 1 },  // DS_NOCHK?
     { 0, &g_earthquakeTime, sizeof(g_earthquakeTime), 1 },
 
-    { DS_SAVEFN|DS_LOADFN|DS_NOCHK, (void *)sv_prequote, 0, 1 },
-    { DS_SAVEFN, (void *)&sv_quotesave, 0, 1 },
-    { DS_NOCHK, &savegame_quotedef, sizeof(savegame_quotedef), 1 },  // quotes can change during runtime, but new quote numbers cannot be allocated
-    { DS_DYNAMIC, &savegame_quotes, MAXQUOTELEN, MAXQUOTES },
-    { DS_LOADFN, (void *)&sv_quoteload, 0, 1 },
-
-    { DS_NOCHK|DS_SAVEFN|DS_LOADFN, (void *)&sv_prequoteredef, 0, 1 },
-    { DS_NOCHK|DS_SAVEFN, (void *)&sv_quoteredefsave, 0, 1 },  // quote redefinitions replace quotes at runtime, but cannot be changed after CON compilation
-    { DS_NOCHK|DS_DYNAMIC|DS_CNT(g_numXStrings), &savegame_quoteredefs, MAXQUOTELEN, (intptr_t)&g_numXStrings },
-    { DS_NOCHK|DS_LOADFN, (void *)&sv_quoteredefload, 0, 1 },
-    { DS_NOCHK|DS_SAVEFN|DS_LOADFN, (void *)&sv_postquoteredef, 0, 1 },
-#ifdef LUNATIC
-    { 0, g_playerWeapon, sizeof(weapondata_t), MAXPLAYERS*MAX_WEAPONS },
-#endif
     { DS_SAVEFN, (void *)&sv_restsave, 0, 1 },
     { 0, savegame_restdata, 1, sizeof(savegame_restdata) },  // sz/cnt swapped for kdfread
     { DS_LOADFN, (void *)&sv_restload, 0, 1 },
 
-    { DS_STRING, (void *)svgm_end_string, 0, 1 },
     { DS_END, 0, 0, 0 }
 };
 
-#if !defined LUNATIC
 static dataspec_gv_t *svgm_vars=NULL;
-#endif
 static uint8_t *dosaveplayer2(buildvfs_FILE fil, uint8_t *mem);
 static int32_t doloadplayer2(buildvfs_kfd fil, uint8_t **memptr);
 static void postloadplayer(int32_t savegamep);
@@ -1585,8 +1541,7 @@ static uint8_t *svdiff;
 
 #include "gamedef.h"
 
-#if !defined LUNATIC
-#define SV_SKIPMASK (/*GAMEVAR_SYSTEM|*/ GAMEVAR_READONLY | GAMEVAR_PTR_MASK | /*GAMEVAR_NORESET |*/ GAMEVAR_SPECIAL)
+#define SV_SKIPMASK (GAMEVAR_PTR_MASK|SAVEGAMEVARSKIPMASK)
 
 static char svgm_vars_string [] = "blK:vars";
 // setup gamevar data spec for snapshotting and diffing... gamevars must be loaded when called
@@ -1598,7 +1553,7 @@ static void sv_makevarspec()
         vcnt += (aGameVars[i].flags & SV_SKIPMASK) ? 0 : 1;
 
     for (int i=0; i<g_gameArrayCount; i++)
-        vcnt += !(aGameArrays[i].flags & (GAMEARRAY_SYSTEM|GAMEARRAY_READONLY));  // SYSTEM_GAMEARRAY
+        vcnt += !(aGameArrays[i].flags & SAVEGAMEARRAYSKIPMASK);  // SYSTEM_GAMEARRAY
 
     svgm_vars = (dataspec_gv_t *)Xrealloc(svgm_vars, (vcnt + 2) * sizeof(dataspec_gv_t));
 
@@ -1628,7 +1583,7 @@ static void sv_makevarspec()
         // We must not update read-only SYSTEM_GAMEARRAY gamearrays: besides
         // being questionable by itself, sizeof(...) may be e.g. 4 whereas the
         // actual element type is int16_t (such as tilesizx[]/tilesizy[]).
-        if (aGameArrays[i].flags & (GAMEARRAY_SYSTEM|GAMEARRAY_READONLY))
+        if (aGameArrays[i].flags & SAVEGAMEARRAYSKIPMASK)
             continue;
 
         auto const pValues = aGameArrays[i].pValues;
@@ -1655,7 +1610,6 @@ static void sv_makevarspec()
     svgm_vars[vcnt].size  = 0;
     svgm_vars[vcnt].cnt   = 0;
 }
-#endif
 
 void sv_freemem()
 {
@@ -1685,12 +1639,8 @@ int32_t sv_saveandmakesnapshot(buildvfs_FILE fil, char const *name, int8_t spot,
     savegame_diffcompress = diffcompress;
 
     // calculate total snapshot size
-#if !defined LUNATIC
     sv_makevarspec();
     svsnapsiz = calcsz((const dataspec_t *)svgm_vars);
-#else
-    svsnapsiz = 0;
-#endif
     svsnapsiz += calcsz(svgm_udnetw) + calcsz(svgm_secwsp) + calcsz(svgm_script) + calcsz(svgm_anmisc);
 
 
@@ -1705,7 +1655,8 @@ int32_t sv_saveandmakesnapshot(buildvfs_FILE fil, char const *name, int8_t spot,
 
     h.bytever      = BYTEVERSION;
     h.userbytever  = ud.userbytever;
-    h.scriptcrc    = g_scriptcrc;
+
+    Bstrncpyz(h.scriptname, g_scriptFileName, sizeof(h.scriptname));
     h.comprthres   = savegame_comprthres;
     h.recdiffsp    = recdiffsp;
     h.diffcompress = savegame_diffcompress;
@@ -1722,9 +1673,7 @@ int32_t sv_saveandmakesnapshot(buildvfs_FILE fil, char const *name, int8_t spot,
     h.levnum     = ud.level_number;
     h.skill      = ud.player_skill;
 
-    const uint32_t BSZ = sizeof(h.boardfn);
-    EDUKE32_STATIC_ASSERT(BSZ == sizeof(currentboardfilename));
-    Bstrncpy(h.boardfn, currentboardfilename, BSZ);
+    Bstrncpyz(h.boardfn, currentboardfilename, sizeof(h.boardfn));
 
     if (spot >= 0)
     {
@@ -1777,15 +1726,6 @@ int32_t sv_saveandmakesnapshot(buildvfs_FILE fil, char const *name, int8_t spot,
     {
         // savegame
         dosaveplayer2(fil, NULL);
-#ifdef LUNATIC
-        if (!g_savedOK)
-        {
-            OSD_Printf("sv_saveandmakesnapshot: failed serializing Lunatic gamevar \"%s\".\n",
-                       g_failedVarname);
-            g_failedVarname = NULL;
-            return 1;
-        }
-#endif
     }
     else
     {
@@ -1816,11 +1756,7 @@ int32_t sv_loadheader(buildvfs_kfd fil, int32_t spot, savehead_t *h)
         return -1;
     }
 
-    if (Bmemcmp(h->headerstr, "E32SAVEGAME", 11)
-#if 1
-        && Bmemcmp(h->headerstr, "EDuke32SAVE", 11)
-#endif
-       )
+    if (Bmemcmp(h->headerstr, "E32SAVEGAME", 11))
     {
         char headerCstr[sizeof(h->headerstr) + 1];
         Bmemcpy(headerCstr, h->headerstr, sizeof(h->headerstr));
@@ -1831,18 +1767,17 @@ int32_t sv_loadheader(buildvfs_kfd fil, int32_t spot, savehead_t *h)
         return -2;
     }
 
-    if (h->majorver != SV_MAJOR_VER || h->minorver != SV_MINOR_VER || h->bytever != BYTEVERSION || h->userbytever != ud.userbytever || (apScript != NULL && h->scriptcrc != g_scriptcrc))
+    if (h->majorver != SV_MAJOR_VER || h->minorver != SV_MINOR_VER || h->bytever != BYTEVERSION || h->userbytever != ud.userbytever
+        || Bstrncasecmp(g_scriptFileName, h->scriptname, Bstrlen(h->scriptname)))
     {
 #ifndef DEBUGGINGAIDS
         if (havedemo)
 #endif
-            OSD_Printf("Incompatible savegame. Expected version %d.%d.%d.%d.%0x, found %d.%d.%d.%d.%0x\n", SV_MAJOR_VER, SV_MINOR_VER, BYTEVERSION,
-                       ud.userbytever, g_scriptcrc, h->majorver, h->minorver, h->bytever, h->userbytever, h->scriptcrc);
+            OSD_Printf("Incompatible savegame. Expected version %d.%d.%d.%d created with %s, found %d.%d.%d.%d created with %s\n", SV_MAJOR_VER, SV_MINOR_VER, BYTEVERSION,
+                       ud.userbytever, g_scriptFileName, h->majorver, h->minorver, h->bytever, h->userbytever, h->scriptname);
 
         if (h->majorver == SV_MAJOR_VER && h->minorver == SV_MINOR_VER)
-        {
             return 1;
-        }
         else
         {
             Bmemset(h->headerstr, 0, sizeof(h->headerstr));
@@ -1958,9 +1893,7 @@ uint32_t sv_writediff(buildvfs_FILE fil)
     cmpspecdata(svgm_secwsp, &p, &d);
     cmpspecdata(svgm_script, &p, &d);
     cmpspecdata(svgm_anmisc, &p, &d);
-#if !defined LUNATIC
     cmpspecdata((const dataspec_t *)svgm_vars, &p, &d);
-#endif
 
     if (p != svsnapshot+svsnapsiz)
         OSD_Printf("sv_writediff: dump+siz=%p, p=%p!\n", svsnapshot+svsnapsiz, p);
@@ -2003,9 +1936,7 @@ int32_t sv_readdiff(buildvfs_kfd fil)
     if (applydiff(svgm_secwsp, &p, &d)) return -4;
     if (applydiff(svgm_script, &p, &d)) return -5;
     if (applydiff(svgm_anmisc, &p, &d)) return -6;
-#if !defined LUNATIC
     if (applydiff((const dataspec_t *)svgm_vars, &p, &d)) return -7;
-#endif
 
     int i = 0;
 
@@ -2042,7 +1973,7 @@ static void sv_postudload()
 #ifdef USE_OPENGL
 static void sv_prespriteextsave()
 {
-    for (int i=0; i<MAXSPRITES; i++)
+    for (int i=0; i<MAXSPRITES+MAXUNIQHUDID; i++)
         if (spriteext[i].mdanimtims)
         {
             spriteext[i].mdanimtims -= mdtims;
@@ -2052,7 +1983,7 @@ static void sv_prespriteextsave()
 }
 static void sv_postspriteext()
 {
-    for (int i=0; i<MAXSPRITES; i++)
+    for (int i=0; i<MAXSPRITES+MAXUNIQHUDID; i++)
         if (spriteext[i].mdanimtims)
             spriteext[i].mdanimtims += mdtims;
 }
@@ -2065,15 +1996,123 @@ void sv_postyaxload(void)
 }
 #endif
 
-static void sv_postactordata()
+static void sv_prelabelsave(void)
 {
-#ifdef POLYMER
-    for (auto & i : actor)
+    savegame_labelcnt = g_labelCnt;
+    savegame_labels   = label;
+}
+
+static void sv_prelabelload(void)
+{
+    savegame_labels = (char *)Xmalloc(savegame_labelcnt << 6);
+}
+
+static int sv_findlabelindex(int32_t const val, int const type)
+{
+    for (int i=0;i<g_labelCnt;i++)
+        if (labelcode[i] == val && (labeltype[i] & type) != 0)
+            return i;
+
+    for (int i=0;i<g_labelCnt;i++)
+        if (labelcode[i] == val)
+            return i;
+
+    return -1;
+}
+
+static inline int sv_checkoffset(int const scriptoffs, int const val, int const endoffs)
+{
+    return ((unsigned)scriptoffs > 0 && (unsigned)scriptoffs + endoffs < (unsigned)g_scriptSize
+            && apScript[scriptoffs - 1] == val
+            && apScript[scriptoffs + endoffs] == CON_END);
+}
+
+// translate anything in actor[] that holds an offset into compiled CON into a label index
+static void sv_preactorsave(void)
+{
+    for (int i = 0; i < MAXSPRITES; i++)
     {
-        i.lightptr = NULL;
-        i.lightId = -1;
+        auto &a = actor[i];
+
+        if (sv_checkoffset(AC_MOVE_ID(a.t_data), CON_MOVE, 3))
+        {
+            int const index = sv_findlabelindex(AC_MOVE_ID(a.t_data), LABEL_MOVE | LABEL_DEFINE);
+            Bassert(index != -1);
+            AC_MOVE_ID(a.t_data) = index;
+            a.flags |= SFLAG_RESERVED;
+        }
+
+        if (sv_checkoffset(AC_ACTION_ID(a.t_data), CON_ACTION, ACTION_PARAM_COUNT))
+        {
+            int const index = sv_findlabelindex(AC_ACTION_ID(a.t_data), LABEL_ACTION);
+            Bassert(index != -1);
+            AC_ACTION_ID(a.t_data) = index;
+            a.flags |= SFLAG_RESERVED2;
+        }
+
+        if (sv_checkoffset(AC_AI_ID(a.t_data), CON_AI, 3))
+        {
+            int const index = sv_findlabelindex(AC_AI_ID(a.t_data), LABEL_AI);
+            Bassert(index != -1);
+            AC_AI_ID(a.t_data) = index;
+            a.flags |= SFLAG_RESERVED3;
+        }
     }
+}
+
+// translate the script offsets back from label index to offset in the currently compiled script
+static void sv_postactordata(void)
+{
+    for (int i = 0; i < MAXSPRITES; i++)
+    {
+        auto &a = actor[i];
+        auto  s = (uspriteptr_t)&sprite[i];
+
+#ifdef POLYMER
+        practor[i].lightptr = NULL;
+        practor[i].lightId = -1;
 #endif
+        if (a.flags & SFLAG_RESERVED)
+        {
+            int const index = hash_find(&h_labels, &savegame_labels[AC_MOVE_ID(a.t_data) << 6]);
+            if (index == -1)
+            {
+                OSD_Printf("couldn't find savegame label %s\n", &savegame_labels[AC_MOVE_ID(a.t_data) << 6]);
+                AC_MOVE_ID(a.t_data) = *(g_tile[s->picnum].execPtr + 2);
+            }
+            else
+                AC_MOVE_ID(a.t_data) = labelcode[index];
+        }
+
+        if (a.flags & SFLAG_RESERVED2)
+        {
+            char *str = &savegame_labels[AC_ACTION_ID(a.t_data) << 6];
+            int const index = hash_find(&h_labels, str);
+            if (index == -1)
+            {
+                OSD_Printf("couldn't find savegame label %s\n", &savegame_labels[AC_ACTION_ID(a.t_data) << 6]);
+                if (g_tile[s->picnum].execPtr)
+                    AC_ACTION_ID(a.t_data) = *(g_tile[s->picnum].execPtr + 1);
+                AC_ACTION_COUNT(a.t_data) = 0;
+                AC_CURFRAME(a.t_data)     = 0;
+            }
+            else
+                AC_ACTION_ID(a.t_data) = labelcode[index];
+        }
+
+        if (a.flags & SFLAG_RESERVED3)
+        {
+            int const index = hash_find(&h_labels, &savegame_labels[AC_AI_ID(a.t_data) << 6]);
+            if (index == -1)
+            {
+                OSD_Printf("couldn't find savegame label %s\n", &savegame_labels[AC_AI_ID(a.t_data) << 6]);
+                AC_AI_ID(a.t_data) = 0;
+            }
+            else
+                AC_AI_ID(a.t_data) = labelcode[index];
+        }
+        a.flags &= ~(SFLAG_RESERVED|SFLAG_RESERVED2|SFLAG_RESERVED3);
+    }
 }
 
 static void sv_preanimateptrsave()
@@ -2083,33 +2122,6 @@ static void sv_preanimateptrsave()
 static void sv_postanimateptr()
 {
     G_Util_PtrToIdx(g_animatePtr, g_animateCnt, sector, P2I_BACK);
-}
-static void sv_prequote()
-{
-    if (!savegame_quotes)
-    {
-        void *ptr = Xcalloc(MAXQUOTES, MAXQUOTELEN);
-        savegame_quotes = (char(*)[MAXQUOTELEN])ptr;
-    }
-}
-static void sv_quotesave()
-{
-    Bmemset(savegame_quotedef, 0, sizeof(savegame_quotedef));
-    for (int i = 0; i < MAXQUOTES; i++)
-        if (apStrings[i])
-        {
-            savegame_quotedef[i>>3] |= 1<<(i&7);
-            Bmemcpy(savegame_quotes[i], apStrings[i], MAXQUOTELEN);
-        }
-}
-static void sv_quoteload()
-{
-    for (int i = 0; i < MAXQUOTES; i++)
-        if (savegame_quotedef[i>>3] & pow2char[i&7])
-        {
-            C_AllocQuote(i);
-            Bmemcpy(apStrings[i], savegame_quotes[i], MAXQUOTELEN);
-        }
 }
 
 static void sv_preprojectilesave()
@@ -2167,31 +2179,6 @@ static void sv_postprojectileload()
     DO_FREE_AND_NULL(savegame_projectiledata);
 }
 
-static void sv_prequoteredef()
-{
-    // "+1" needed for dfwrite which doesn't handle the src==NULL && cnt==0 case
-    void *ptr = Xcalloc(g_numXStrings+1, MAXQUOTELEN);
-    savegame_quoteredefs = (decltype(savegame_quoteredefs))ptr;
-}
-static void sv_quoteredefsave()
-{
-    for (int i = 0; i < g_numXStrings; i++)
-        if (apXStrings[i])
-            Bmemcpy(savegame_quoteredefs[i], apXStrings[i], MAXQUOTELEN);
-}
-static void sv_quoteredefload()
-{
-    for (int i = 0; i < g_numXStrings; i++)
-    {
-        if (!apXStrings[i])
-            apXStrings[i] = (char *)Xcalloc(1,MAXQUOTELEN);
-        Bmemcpy(apXStrings[i], savegame_quoteredefs[i], MAXQUOTELEN);
-    }
-}
-static void sv_postquoteredef()
-{
-    Xfree(savegame_quoteredefs), savegame_quoteredefs=NULL;
-}
 static void sv_restsave()
 {
     uint8_t *    mem = savegame_restdata;
@@ -2239,12 +2226,6 @@ static void sv_restload()
 # define PRINTSIZE(name) do { } while (0)
 #endif
 
-#ifdef LUNATIC
-// <levelnum>: if we're not serializing for a mapstate, -1
-//  otherwise, the linearized level number
-LUNATIC_CB const char *(*El_SerializeGamevars)(int32_t *slenptr, int32_t levelnum);
-#endif
-
 static uint8_t *dosaveplayer2(buildvfs_FILE fil, uint8_t *mem)
 {
 #ifdef DEBUGGINGAIDS
@@ -2255,105 +2236,17 @@ static uint8_t *dosaveplayer2(buildvfs_FILE fil, uint8_t *mem)
     PRINTSIZE("ud");
     mem=writespecdata(svgm_secwsp, fil, mem);  // sector, wall, sprite
     PRINTSIZE("sws");
-#ifdef LUNATIC
-    {
-        // Serialize Lunatic gamevars. When loading, the restoration code must
-        // be present before Lua state creation in svgm_script, so save it
-        // right before, too.
-        int32_t slen, slen_ext;
-        const char *svcode = El_SerializeGamevars(&slen, -1);
-
-        if (slen < 0)
-        {
-            // Serialization failed.
-            g_savedOK = 0;
-            g_failedVarname = svcode;
-            return mem;
-        }
-
-        buildvfs_fwrite("\0\1LunaGVAR\3\4", 12, 1, fil);
-        slen_ext = B_LITTLE32(slen);
-        buildvfs_fwrite(&slen_ext, sizeof(slen_ext), 1, fil);
-        dfwrite_LZ4(svcode, 1, slen, fil);  // cnt and sz swapped
-
-        g_savedOK = 1;
-    }
-#endif
     mem=writespecdata(svgm_script, fil, mem);  // script
     PRINTSIZE("script");
     mem=writespecdata(svgm_anmisc, fil, mem);  // animates, quotes & misc.
     PRINTSIZE("animisc");
 
-#if !defined LUNATIC
     Gv_WriteSave(fil);  // gamevars
     mem=writespecdata((const dataspec_t *)svgm_vars, 0, mem);
     PRINTSIZE("vars");
-#endif
 
     return mem;
 }
-
-#ifdef LUNATIC
-char *g_elSavecode = NULL;
-
-static int32_t El_ReadSaveCode(buildvfs_kfd fil)
-{
-    // Read Lua code to restore gamevar values from the savegame.
-    // It will be run from Lua with its state creation later on.
-
-    char header[12];
-    int32_t slen;
-
-    if (kread(fil, header, 12) != 12)
-    {
-        OSD_Printf("doloadplayer2: failed reading Lunatic gamevar header.\n");
-        return -100;
-    }
-
-    if (Bmemcmp(header, "\0\1LunaGVAR\3\4", 12))
-    {
-        OSD_Printf("doloadplayer2: Lunatic gamevar header doesn't match.\n");
-        return -101;
-    }
-
-    if (kread(fil, &slen, sizeof(slen)) != sizeof(slen))
-    {
-        OSD_Printf("doloadplayer2: failed reading Lunatic gamevar string size.\n");
-        return -102;
-    }
-
-    slen = B_LITTLE32(slen);
-    if (slen < 0)
-    {
-        OSD_Printf("doloadplayer2: invalid Lunatic gamevar string size %d.\n", slen);
-        return -103;
-    }
-
-    if (slen > 0)
-    {
-        char *svcode = (char *)Xmalloc(slen+1);
-
-        if (kdfread_LZ4(svcode, 1, slen, fil) != slen)  // cnt and sz swapped
-        {
-            OSD_Printf("doloadplayer2: failed reading Lunatic gamevar restoration code.\n");
-            Xfree(svcode);
-            return -104;
-        }
-
-        svcode[slen] = 0;
-        g_elSavecode = svcode;
-    }
-
-    return 0;
-}
-
-void El_FreeSaveCode(void)
-{
-    // Free Lunatic gamevar savegame restoration Lua code.
-    Xfree(g_elSavecode);
-    g_elSavecode = NULL;
-}
-#endif
 
 static int32_t doloadplayer2(buildvfs_kfd fil, uint8_t **memptr)
 {
@@ -2366,22 +2259,17 @@ static int32_t doloadplayer2(buildvfs_kfd fil, uint8_t **memptr)
     PRINTSIZE("ud");
     if (readspecdata(svgm_secwsp, fil, &mem)) return -4;
     PRINTSIZE("sws");
-#ifdef LUNATIC
-    {
-        int32_t ret = El_ReadSaveCode(fil);
-        if (ret < 0)
-            return ret;
-    }
-#endif
     if (readspecdata(svgm_script, fil, &mem)) return -5;
     PRINTSIZE("script");
     if (readspecdata(svgm_anmisc, fil, &mem)) return -6;
     PRINTSIZE("animisc");
 
-#if !defined LUNATIC
-    int i;
+    int const i = Gv_ReadSave(fil);
 
-    if ((i = Gv_ReadSave(fil))) return i;
+    if (savegame_labels != label)
+        DO_FREE_AND_NULL(savegame_labels);
+
+    if (i) return i;
 
     if (mem)
     {
@@ -2395,7 +2283,6 @@ static int32_t doloadplayer2(buildvfs_kfd fil, uint8_t **memptr)
         }
     }
     PRINTSIZE("vars");
-#endif
 
     if (memptr)
         *memptr = mem;
@@ -2414,9 +2301,7 @@ int32_t sv_updatestate(int32_t frominit)
     if (readspecdata(svgm_script, buildvfs_kfd_invalid, &p)) return -5;
     if (readspecdata(svgm_anmisc, buildvfs_kfd_invalid, &p)) return -6;
 
-#if !defined LUNATIC
     if (readspecdata((const dataspec_t *)svgm_vars, buildvfs_kfd_invalid, &p)) return -8;
-#endif
 
     if (p != pbeg+svsnapsiz)
     {
@@ -2493,8 +2378,10 @@ static void postloadplayer(int32_t savegamep)
         for (SPRITES_OF(STAT_FX, i))
             if (sprite[i].picnum == MUSICANDSFX)
             {
+                int soundNum = sprite[i].lotag;
                 T2(i) = ud.config.SoundToggle;
-                T1(i) = 0;
+                if (!((g_sounds[soundNum].m & SF_LOOP) || (sprite[i].hitag && sprite[i].hitag != soundNum)))
+                    T1(i) = 0;
             }
 
         G_UpdateScreenArea();
@@ -2508,13 +2395,13 @@ static void postloadplayer(int32_t savegamep)
         if (ud.lockout)
         {
             for (i=0; i<g_animWallCnt; i++)
-                switch (DYNAMICTILEMAP(wall[animwall[i].wallnum].picnum))
+                switch (tileGetMapping(wall[animwall[i].wallnum].picnum))
                 {
-                case FEMPIC1__STATIC:
+                case FEMPIC1__:
                     wall[animwall[i].wallnum].picnum = BLANKSCREEN;
                     break;
-                case FEMPIC2__STATIC:
-                case FEMPIC3__STATIC:
+                case FEMPIC2__:
+                case FEMPIC3__:
                     wall[animwall[i].wallnum].picnum = SCREENBREAK6;
                     break;
                 }
@@ -2554,11 +2441,7 @@ static void postloadplayer(int32_t savegamep)
 
     //8
     // if (savegamep)  ?
-#ifdef LUNATIC
-    G_ResetTimers(1);
-#else
     G_ResetTimers(0);
-#endif
 
 #ifdef USE_STRUCT_TRACKERS
     Bmemset(sectorchanged, 0, sizeof(sectorchanged));
@@ -2580,8 +2463,8 @@ static void postloadplayer(int32_t savegamep)
     // change to Polymer later
     for (i=0; i<MAXSPRITES; i++)
     {
-        actor[i].lightptr = NULL;
-        actor[i].lightId = -1;
+        practor[i].lightptr = NULL;
+        practor[i].lightId = -1;
     }
 #endif
 }

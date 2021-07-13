@@ -73,12 +73,6 @@ void polymost_useShaderProgram(uint32_t shaderID);
 
 float* multiplyMatrix4f(float m0[4*4], const float m1[4*4]);
 
-//POGOTODO: these wrappers won't be needed down the line -- remove them once proper draw call organization is finished
-#undef glActiveTexture
-#undef glBindTexture
-#define glActiveTexture polymost_activeTexture
-#define glBindTexture polymost_bindTexture
-
 void polymost_glinit(void);
 void polymost_glreset(void);
 
@@ -116,7 +110,7 @@ static FORCE_INLINE int32_t eligible_for_tileshades(int32_t const picnum, int32_
 
 static FORCE_INLINE int polymost_usetileshades(void)
 {
-    return r_usetileshades && !(globalflags & GLOBAL_NO_GL_TILESHADES);
+    return r_useindexedcolortextures && r_usetileshades && !(globalflags & GLOBAL_NO_GL_TILESHADES);
 }
 
 static inline float getshadefactor(int32_t const shade)

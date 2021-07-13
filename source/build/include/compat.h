@@ -66,7 +66,9 @@
 # define CSTD 0
 #endif
 
-#if defined __cplusplus && __cplusplus >= 201703L
+#if defined __cplusplus && __cplusplus >= 202002L
+# define CXXSTD 2020
+#elif defined __cplusplus && __cplusplus >= 201703L
 # define CXXSTD 2017
 #elif defined __cplusplus && __cplusplus >= 201402L
 # define CXXSTD 2014
@@ -167,7 +169,7 @@
 # define EXTERN_INLINE_HEADER extern __fastcall
 #endif
 
-#if 0 && defined(__OPTIMIZE__) && (defined __GNUC__ || __has_builtin(__builtin_expect))
+#if 1 && defined(__OPTIMIZE__) && (defined __GNUC__ || __has_builtin(__builtin_expect))
 #define EDUKE32_PREDICT_TRUE(x)       __builtin_expect(!!(x),1)
 #define EDUKE32_PREDICT_FALSE(x)     __builtin_expect(!!(x),0)
 #else
@@ -175,14 +177,17 @@
 #define EDUKE32_PREDICT_FALSE(x) (x)
 #endif
 
-#if EDUKE32_GCC_PREREQ(4,5)  || __has_builtin(__builtin_unreachable)
-#define EDUKE32_UNREACHABLE_SECTION(...)   __builtin_unreachable()
-#elif _MSC_VER
-#define EDUKE32_UNREACHABLE_SECTION(...)   __assume(0)
+#ifdef DEBUG
+# define EDUKE32_UNREACHABLE_SECTION(...) debug_break()
 #else
-#define EDUKE32_UNREACHABLE_SECTION(...) __VA_ARGS__
+# if EDUKE32_GCC_PREREQ(4,5)  || __has_builtin(__builtin_unreachable)
+#  define EDUKE32_UNREACHABLE_SECTION(...)   __builtin_unreachable()
+# elif _MSC_VER
+#  define EDUKE32_UNREACHABLE_SECTION(...)   __assume(0)
+# else
+#  define EDUKE32_UNREACHABLE_SECTION(...) __VA_ARGS__
+# endif
 #endif
-
 #if EDUKE32_GCC_PREREQ(2,0) || defined _MSC_VER
 # define EDUKE32_FUNCTION __FUNCTION__
 #elif CSTD >= 1999 || CXXSTD >= 2011
@@ -207,7 +212,7 @@
 
 #if CXXSTD >= 2017
 # define EDUKE32_STATIC_ASSERT(cond) static_assert(cond)
-#elif CXXSTD >= 2011 || CSTD >= 2011 || EDUKE32_MSVC_CXX_PREREQ(1600)
+#elif CXXSTD >= 2011 || CSTD >= 2011 || EDUKE32_MSVC_PREREQ(1600)
 # define EDUKE32_STATIC_ASSERT(cond) static_assert(cond, "")
 #else
 /* C99 / C++03 static assertions based on source found in LuaJIT's src/lj_def.h. */
@@ -243,7 +248,7 @@
 #define STATIC_CAST(t, v) (STATIC_CAST_OP(t)(v))
 #define REINTERPRET_CAST(t, v) (REINTERPRET_CAST_OP(t)(v))
 
-#if defined __cplusplus && (__cplusplus >= 201103L || __has_feature(cxx_constexpr) || EDUKE32_MSVC_PREREQ(1900))
+#if defined __cplusplus && (__cplusplus >= 201103L || __has_feature(cxx_constexpr) || EDUKE32_MSVC_CXX_PREREQ(1900))
 # define HAVE_CONSTEXPR
 # define CONSTEXPR constexpr
 #else
@@ -474,7 +479,7 @@ defined __x86_64__ || defined __amd64__ || defined _M_X64 || defined _M_IA64 || 
 #ifdef _MSC_VER
 # if defined _M_AMD64 || defined _M_ARM64 || defined _M_X64 || defined _WIN64
 // should be int64_t, if not for a suspected VS compiler bug
-typedef int32_t ssize_t;
+typedef int64_t ssize_t;
 # else
 typedef int32_t ssize_t;
 # endif
@@ -650,14 +655,14 @@ static FORCE_INLINE int32_t atoi_safe(const char *str) { return (int32_t)Bstrtol
 #define Batol(str) (strtol(str, NULL, 10))
 #define Batof(str) (strtod(str, NULL))
 
-#if defined BITNESS64 && (defined __SSE2__ || defined _MSC_VER)
+#if defined BITNESS64 && (defined __SSE2__ || defined _MSC_VER) && !defined(_M_ARM64)
 #include <emmintrin.h>
 static FORCE_INLINE int32_t Blrintf(const float x)
 {
     __m128 xx = _mm_load_ss(&x);
     return _mm_cvtss_si32(xx);
 }
-#elif defined (_MSC_VER)
+#elif defined(_MSC_VER) && !defined(_M_ARM64)
 static FORCE_INLINE int32_t Blrintf(const float x)
 {
     int n;
@@ -850,41 +855,69 @@ typedef reg_t unative_t;
 #endif
 EDUKE32_STATIC_ASSERT(sizeof(native_t) == sizeof(unative_t));
 
-typedef struct MAY_ALIAS {
+typedef struct vec2_ {
     int32_t x, y;
-} vec2_t;
+#ifdef __cplusplus
+    inline bool operator==(struct vec2_ const c) { return x == c.x && y == c.y; }
+    inline bool operator!=(struct vec2_ const c) { return x != c.x || y != c.y; }
+#endif
+} MAY_ALIAS vec2_t;
 
-typedef struct MAY_ALIAS {
+typedef struct vec2_16_ {
     int16_t x, y;
-} vec2_16_t;
+#ifdef __cplusplus
+    inline bool operator==(struct vec2_16_ const c) { return x == c.x && y == c.y; }
+    inline bool operator!=(struct vec2_16_ const c) { return x != c.x || y != c.y; }
+#endif // __cplusplus
+} MAY_ALIAS vec2_16_t;
 
-typedef struct {
+typedef struct vec2u_ {
     uint32_t x, y;
+#ifdef __cplusplus
+    inline bool operator==(struct vec2u_ const c) { return x == c.x && y == c.y; }
+    inline bool operator!=(struct vec2u_ const c) { return x != c.x || y != c.y; }
+#endif // __cplusplus
 } vec2u_t;
 
-typedef struct {
+typedef struct vec2f_ {
     float x, y;
+#ifdef __cplusplus
+    inline bool operator==(struct vec2f_ const &c) { return x == c.x && y == c.y; }
+    inline bool operator!=(struct vec2f_ const &c) { return x != c.x || y != c.y; }
+#endif // __cplusplus
 } vec2f_t;
 
-typedef struct {
+typedef struct vec2d_ {
     double x, y;
+#ifdef __cplusplus
+    inline bool operator==(struct vec2d_ const &c) { return x == c.x && y == c.y; }
+    inline bool operator!=(struct vec2d_ const &c) { return x != c.x || y != c.y; }
+#endif // __cplusplus
 } vec2d_t;
 
-typedef struct MAY_ALIAS {
+typedef struct vec3_ {
     union {
         struct { int32_t x, y, z; };
         vec2_t  vec2;
     };
-} vec3_t;
+#ifdef __cplusplus
+    inline bool operator==(struct vec3_ const c) { return x == c.x && y == c.y && z == c.z; }
+    inline bool operator!=(struct vec3_ const c) { return x != c.x || y != c.y || z != c.z; }
+#endif // __cplusplus
+} MAY_ALIAS vec3_t;
 
-typedef struct MAY_ALIAS {
+typedef struct vec3_16_ {
     union {
         struct { int16_t x, y, z; };
         vec2_16_t vec2;
     };
-} vec3_16_t;
+#ifdef __cplusplus
+    inline bool operator==(struct vec3_16_ const c) { return x == c.x && y == c.y && z == c.z; }
+    inline bool operator!=(struct vec3_16_ const c) { return x != c.x || y != c.y || z != c.z; }
+#endif // __cplusplus
+} MAY_ALIAS vec3_16_t;
 
-typedef struct {
+typedef struct vec3f_ {
     union {
         struct {
             union { float x, d; };
@@ -893,25 +926,59 @@ typedef struct {
         };
         vec2f_t vec2;
     };
+#ifdef __cplusplus
+    inline bool operator==(struct vec3f_ const &c) { return x == c.x && y == c.y && z == c.z; }
+    inline bool operator!=(struct vec3f_ const &c) { return x != c.x || y != c.y || z != c.z; }
+#endif // __cplusplus
 } vec3f_t;
 
 EDUKE32_STATIC_ASSERT(sizeof(vec3f_t) == sizeof(float) * 3);
 
-typedef struct {
-    union { double x; double d; };
-    union { double y; double u; };
-    union { double z; double v; };
+typedef struct vec3d_ {
+    union {
+        struct {
+            union { double x, d; };
+            union { double y, u; };
+            union { double z, v; };
+        };
+        vec2d_t vec2;
+    };
+#ifdef __cplusplus
+    inline bool operator==(struct vec3d_ const &c) { return x == c.x && y == c.y && z == c.z; }
+    inline bool operator!=(struct vec3d_ const &c) { return x != c.x || y != c.y || z != c.z; }
+#endif // __cplusplus
 } vec3d_t;
 
 EDUKE32_STATIC_ASSERT(sizeof(vec3d_t) == sizeof(double) * 3);
 
-typedef struct {
-    float x, y, z, w;
-} vec4f_t;
+typedef struct vec4_ {
+    union {
+        struct { int32_t x, y, z, a; };
+        vec3_t vec3;
+        vec2_t vec2;
+    };
+#ifdef __cplusplus
+    inline bool operator==(struct vec4_ const c) { return x == c.x && y == c.y && z == c.z && a == c.a; }
+    inline bool operator!=(struct vec4_ const c) { return x != c.x || y != c.y || z != c.z || a != c.a; }
+#endif // __cplusplus
+} vec4_t;
 
-typedef struct {
-    float x, y, z, w;
-} vec4d_t;
+typedef struct vec4f_ {
+    union {
+        struct {
+            union { float x, d; };
+            union { float y, u; };
+            union { float z, v; };
+            float w;
+        };
+        vec3f_t vec3;
+        vec2f_t vec2;
+    };
+#ifdef __cplusplus
+    inline bool operator==(struct vec4f_ const &c) { return x == c.x && y == c.y && z == c.z && w == c.w; }
+    inline bool operator!=(struct vec4f_ const &c) { return x != c.x || y != c.y || z != c.z || w != c.w; }
+#endif // __cplusplus
+} vec4f_t;
 
 
 ////////// Language tricks that depend on size_t //////////
@@ -1011,7 +1078,7 @@ static FORCE_INLINE CONSTEXPR uint64_t B_SWAP64_impl(uint64_t value)
 }
 
 /* The purpose of B_PASS* as functions, as opposed to macros, is to prevent them from being used as lvalues. */
-#if CXXSTD >= 2011 || EDUKE32_MSVC_PREREQ(1900)
+#if defined __cplusplus && (CXXSTD >= 2011 || EDUKE32_MSVC_CXX_PREREQ(1900))
 template <typename T>
 static FORCE_INLINE CONSTEXPR take_sign_t<int16_t, T> B_SWAP16(T x)
 {
@@ -1213,6 +1280,7 @@ static FORCE_INLINE CONSTEXPR char bitmap_test(uint8_t const *const ptr, int con
 ////////// Utility functions //////////
 
 // breadth-first search helpers
+#ifdef __cplusplus
 template <typename T>
 void bfirst_search_init(T *const list, uint8_t *const bitmap, T *const eltnumptr, int const maxelts, int const firstelt)
 {
@@ -1232,6 +1300,7 @@ void bfirst_search_try(T *const list, uint8_t *const bitmap, T *const eltnumptr,
         list[(*eltnumptr)++] = elt;
     }
 }
+#endif
 
 #if RAND_MAX == 32767
 static FORCE_INLINE uint16_t system_15bit_rand(void) { return (uint16_t)rand(); }
@@ -1426,7 +1495,11 @@ static inline void maybe_grow_buffer(char ** const buffer, int32_t * const buffe
 #define LIBDIVIDE_NOINLINE
 #include "fix16.h"
 #include "libdivide.h"
+
+#ifdef __cplusplus
 #include "clockticks.hpp"
+#endif
+
 #include "debugbreak.h"
 
 #include "zpl.h"

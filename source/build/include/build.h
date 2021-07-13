@@ -60,7 +60,7 @@ enum rendmode_t {
 # define MAXSPRITES MAXSPRITESV8
 
 # define MAXXDIM 7680
-# define MAXYDIM 3200
+# define MAXYDIM 4320
 # define MINXDIM 640
 # define MINYDIM 480
 
@@ -86,20 +86,7 @@ enum rendmode_t {
 # define M32_FIXME_SECTORS 0
 #endif
 
-#ifdef LUNATIC
-# define NEW_MAP_FORMAT
-// A marker for LuaJIT C function callbacks, but not merely:
-# define LUNATIC_CB ATTRIBUTE((used))
-// Used for variables and functions referenced from Lua:
-# define LUNATIC_EXTERN ATTRIBUTE((used))
-# define LUNATIC_FASTCALL
-#else
-# ifdef NEW_MAP_FORMAT
-#  error "New map format can only be used with Lunatic"
-# endif
-# define LUNATIC_EXTERN static
-# define LUNATIC_FASTCALL __fastcall
-#endif
+//define NEW_MAP_FORMAT
 
 #define MAXWALLSB ((MAXWALLS>>2)+(MAXWALLS>>3))
 
@@ -250,17 +237,21 @@ enum {
     RS_NOCLIP = 8,
     RS_TOPLEFT = 16,
     RS_TRANS2 = 32,
+    RS_TRANS_MASK = RS_TRANS1|RS_TRANS2,
     RS_NOMASK = 64,
     RS_PERM = 128,
 
     RS_ALIGN_L = 256,
     RS_ALIGN_R = 512,
-    RS_ALIGN_MASK = 768,
+    RS_ALIGN_MASK = RS_ALIGN_L|RS_ALIGN_R,
     RS_STRETCH = 1024,
 
     ROTATESPRITE_FULL16 = 2048,
+    RS_LERP = 4096,
+    RS_FORCELERP = 8192,
+
     // ROTATESPRITE_MAX-1 is the mask of all externally available orientation bits
-    ROTATESPRITE_MAX = 4096,
+    ROTATESPRITE_MAX = 16384,
 
     RS_CENTERORIGIN = (1<<30),
 };
@@ -533,32 +524,45 @@ int32_t getwalldist(vec2_t const in, int const wallnum, vec2_t * const out);
 extern "C" {
 #endif
 
+#pragma pack(push,1)
 typedef struct {
-    uint32_t mdanimtims;
-    int16_t mdanimcur;
-    int16_t angoff, pitch, roll;
-    vec3_t pivot_offset, position_offset;
-    uint8_t flags;
-    uint8_t xpanning, ypanning;
-    uint8_t filler;
-    uint32_t filler2;
-    float alpha;
-    // NOTE: keep 'tspr' on an 8-byte boundary:
-    tspriteptr_t tspr;
+    union
+    {
+        tspriteptr_t tspr;
 #if !defined UINTPTR_MAX
 # error Need UINTPTR_MAX define to select between 32- and 64-bit structs
 #endif
-#if UINTPTR_MAX == 0xffffffff
-    /* On a 32-bit build, pad the struct so it has the same size everywhere. */
-    intptr_t dummy_;
+#if UINTPTR_MAX != UINT64_MAX
+        /* On a 32-bit build, pad the struct so it has the same size everywhere. */
+        uint64_t ptrfill;
 #endif
+    };
+    
+    float    alpha;
+    uint16_t flags;
+
+    // this is organized so that most of the bytes that will usually be zero are adjacent
+    int16_t  mdanimcur;
+    uint32_t mdanimtims;
+    int16_t  mdangoff;
+    uint8_t  xpanning, ypanning;
+    int16_t  mdpitch, mdroll;
+    vec3_t   mdpivot_offset, mdposition_offset;
+
+    // since this goes into savegames, pad to 64 bytes for future usage
+    uint8_t  filler[12];
 } spriteext_t;
+
+EDUKE32_STATIC_ASSERT(offsetof(spriteext_t, flags) % 4 == 0);
+EDUKE32_STATIC_ASSERT(offsetof(spriteext_t, mdangoff) % 4 == 0);
+EDUKE32_STATIC_ASSERT(offsetof(spriteext_t, mdanimtims) % 4 == 0);
+EDUKE32_STATIC_ASSERT(offsetof(spriteext_t, mdposition_offset) % 4 == 0);
+EDUKE32_STATIC_ASSERT(sizeof(spriteext_t) == 64);
 
 typedef struct {
     float smoothduration;
     int16_t mdcurframe, mdoldframe;
     int16_t mdsmooth;
-    uint8_t filler[2];
 } spritesmooth_t;
 
 #ifndef NEW_MAP_FORMAT
@@ -566,6 +570,7 @@ typedef struct {
     uint8_t blend;
 } wallext_t;
 #endif
+#pragma pack(pop)
 
 #define SPREXT_NOTMD 1
 #define SPREXT_NOMDANIM 2
@@ -801,7 +806,7 @@ EXTERN int32_t display_mirror;
 // drawrooms() and is used for animateoffs().
 EXTERN ClockTicks totalclock, totalclocklock;
 static inline int32_t BGetTime(void) { return (int32_t) totalclock; }
-
+EXTERN int32_t rotatespritesmoothratio;
 EXTERN int32_t numframes, randomseed;
 EXTERN int16_t sintable[2048];
 
@@ -921,12 +926,18 @@ enum {
     PICANM_ANIMSPEED_MASK = 15,  // must be 15
 };
 
+enum {
+    TILEFLAGS_NONE = 0,
+    TILEFLAGS_TRUENPOT = (1<<1),
+};
+
 // NOTE: If the layout of this struct is changed, loadpics() must be modified
 // accordingly.
 typedef struct {
     uint8_t num;  // animate number
     int8_t xofs, yofs;
     uint8_t sf;  // anim. speed and flags
+    uint8_t tileflags; // tile-specific flags, such as true non-power-of-2 drawing.
 } picanm_t;
 EXTERN picanm_t picanm[MAXTILES];
 typedef struct { int16_t newtile; int16_t owner; } rottile_t;
@@ -1036,6 +1047,8 @@ extern int32_t enginecompatibilitymode;
 #else
 static CONSTEXPR int32_t const enginecompatibilitymode = ENGINE_EDUKE32;
 #endif
+
+EXTERN int32_t crctab16[256];
 
 /*************************************************************************
 POSITION VARIABLES:
@@ -1171,7 +1184,7 @@ void    tileSetSize(int32_t picnum, int16_t dasizx, int16_t dasizy);
 int32_t artReadHeader(buildvfs_kfd fil, char const *fn, artheader_t *local);
 int32_t artReadHeaderFromBuffer(uint8_t const *buf, artheader_t *local);
 int32_t artCheckUnitFileHeader(uint8_t const *buf, int32_t length);
-void    tileConvertAnimFormat(int32_t picnum);
+void    tileConvertAnimFormat(int32_t picnum, uint32_t const picanmdisk);
 void    artReadManifest(buildvfs_kfd fil, artheader_t const *local);
 void    artPreloadFile(buildvfs_kfd fil, artheader_t const *local);
 int32_t artLoadFiles(const char *filename, int32_t askedsize);
@@ -1228,6 +1241,11 @@ void   printext256(int32_t xpos, int32_t ypos, int16_t col, int16_t backcol,
                    const char *name, char fontsize) ATTRIBUTE((nonnull(5)));
 void   Buninitart(void);
 
+void   initcrc16(void);
+uint16_t getcrc16(char const *buffer, int bufleng);
+#define updatecrc16(crc,dat) (crc = (((crc<<8)&65535)^crctab16[((((uint16_t)crc)>>8)&65535)^(dat)]))
+
+
 ////////// specialized rotatesprite wrappers for (very) often used cases //////////
 static FORCE_INLINE void rotatesprite(int32_t sx, int32_t sy, int32_t z, int16_t a, int16_t picnum,
                                 int8_t dashade, char dapalnum, int32_t dastat,
@@ -1240,6 +1258,15 @@ static FORCE_INLINE void rotatesprite_fs(int32_t sx, int32_t sy, int32_t z, int1
                                    int8_t dashade, char dapalnum, int32_t dastat)
 {
     rotatesprite_(sx, sy, z, a, picnum, dashade, dapalnum, dastat, 0, 0, 0,0,xdim-1,ydim-1);
+}
+
+static FORCE_INLINE void rotatesprite_fs_id(int32_t sx, int32_t sy, int32_t z, int16_t a, int16_t picnum,
+                                   int8_t dashade, char dapalnum, int32_t dastat, int16_t uniqid)
+{
+    int restore = guniqhudid;
+    if (uniqid) guniqhudid = uniqid;
+    rotatesprite_(sx, sy, z, a, picnum, dashade, dapalnum, dastat, 0, 0, 0,0,xdim-1,ydim-1);
+    guniqhudid = restore;
 }
 
 static FORCE_INLINE void rotatesprite_fs_alpha(int32_t sx, int32_t sy, int32_t z, int16_t a, int16_t picnum,
@@ -1289,7 +1316,7 @@ int32_t checksectorpointer(int16_t i, int16_t sectnum);
 
 void   mouseGetValues(int32_t *mousx, int32_t *mousy, int32_t *bstatus) ATTRIBUTE((nonnull(1,2,3)));
 
-#if !KRANDDEBUG && !defined LUNATIC
+#if !KRANDDEBUG
 static FORCE_INLINE int32_t krand(void)
 {
     randomseed = (randomseed * 1664525ul) + 221297ul;
@@ -1299,8 +1326,21 @@ static FORCE_INLINE int32_t krand(void)
 int32_t    krand(void);
 #endif
 
-int32_t   ksqrt(uint32_t num);
-int32_t   LUNATIC_FASTCALL getangle(int32_t xvect, int32_t yvect);
+static FORCE_INLINE int32_t seed_krand(int32_t* seed)
+{
+    *seed = (*seed * 1664525ul) + 221297ul;
+    return ((uint32_t)*seed) >> 16;
+}
+
+int32_t   __fastcall ksqrtasm_old(uint32_t n);
+int32_t   __fastcall ksqrt(uint32_t num);
+int32_t   __fastcall getangle(int32_t xvect, int32_t yvect);
+fix16_t   __fastcall gethiq16angle(int32_t xvect, int32_t yvect);
+
+static FORCE_INLINE fix16_t __fastcall getq16angle(int32_t xvect, int32_t yvect)
+{
+    return fix16_from_int(getangle(xvect, yvect));
+}
 
 static FORCE_INLINE CONSTEXPR uint32_t uhypsq(int32_t const dx, int32_t const dy)
 {
@@ -1314,6 +1354,15 @@ static FORCE_INLINE int32_t logapproach(int32_t const val, int32_t const targetv
 }
 
 void rotatepoint(vec2_t const pivot, vec2_t p, int16_t const daang, vec2_t * const p2) ATTRIBUTE((nonnull(4)));
+
+static inline void rotatevec(vec2_t p, int16_t const daang, vec2_t * const p2)
+{
+    int const dacos = sintable[(daang+2560)&2047];
+    int const dasin = sintable[(daang+2048)&2047];
+    *p2 = { dmulscale14(p.x, dacos, -p.y, dasin), dmulscale14(p.y, dacos, p.x, dasin) };
+}
+
+
 int32_t   lastwall(int16_t point);
 int32_t   nextsectorneighborz(int16_t sectnum, int32_t refz, int16_t topbottom, int16_t direction);
 
@@ -1322,6 +1371,9 @@ int32_t   getflorzofslopeptr(usectorptr_t sec, int32_t dax, int32_t day) ATTRIBU
 void   getzsofslopeptr(usectorptr_t sec, int32_t dax, int32_t day,
                        int32_t *ceilz, int32_t *florz) ATTRIBUTE((nonnull(1,4,5)));
 void yax_getzsofslope(int sectNum, int playerX, int playerY, int32_t* pCeilZ, int32_t* pFloorZ);
+
+int32_t yax_getceilzofslope(int const sectnum, vec2_t const vect);
+int32_t yax_getflorzofslope(int const sectnum, vec2_t const vect);
 
 static FORCE_INLINE int32_t getceilzofslope(int16_t sectnum, int32_t dax, int32_t day)
 {
@@ -1377,6 +1429,7 @@ void   alignceilslope(int16_t dasect, int32_t x, int32_t y, int32_t z);
 void   alignflorslope(int16_t dasect, int32_t x, int32_t y, int32_t z);
 int32_t sectorofwall(int16_t wallNum);
 int32_t sectorofwall_noquick(int16_t wallNum);
+int32_t wallength(int16_t wallNum);
 int32_t   loopnumofsector(int16_t sectnum, int16_t wallnum);
 void setslope(int32_t sectnum, int32_t cf, int16_t slope);
 
@@ -1628,14 +1681,6 @@ static FORCE_INLINE void renderEnableFog(void)
 #endif
 }
 
-static vec2_t const zerovec = { 0, 0 };
-
-#ifdef LUNATIC
-extern const int32_t engine_main_arrays_are_static;
-extern const int32_t engine_v8;
-int32_t Mulscale(int32_t a, int32_t b, int32_t sh);
-#endif
-
 static FORCE_INLINE CONSTEXPR int inside_p(int32_t const x, int32_t const y, int const sectnum) { return (sectnum >= 0 && inside(x, y, sectnum) == 1); }
 
 #define SET_AND_RETURN(Lval, Rval) \
@@ -1645,7 +1690,7 @@ static FORCE_INLINE CONSTEXPR int inside_p(int32_t const x, int32_t const y, int
         return;                    \
     } while (0)
 
-static inline int64_t compat_maybe_truncate_to_int32(int64_t val)
+static FORCE_INLINE int64_t compat_maybe_truncate_to_int32(int64_t val)
 {
     return enginecompatibilitymode != ENGINE_EDUKE32 ? (int32_t)val : val;
 }
