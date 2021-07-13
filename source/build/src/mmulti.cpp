@@ -839,10 +839,6 @@ int getexternaladdress(char *buffer, const char *host, int port)
 
     memset(buffer, 0, sizeof(ipaddr));
 
-<<<<<<< HEAD
-#endif // EDUKE32_STANDALONE
-#endif // __SWITCH__
-=======
 #ifdef _WIN32
     if (wsainitialized == 0)
     {
@@ -910,4 +906,3 @@ int getexternaladdress(char *buffer, const char *host, int port)
     Bmemcpy(buffer,&ipaddr,j);
     return(1);
 }
->>>>>>> master

@@ -35,8 +35,6 @@
 #include "glu_mangle.h"
 #endif
 
-#include <glad/glad.h>
-
 #ifndef GLAPIENTRY
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #define GLAPIENTRY __stdcall
