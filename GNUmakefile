@@ -875,7 +875,7 @@ ifeq ($$(PLATFORM),DARWIN)
 	cp -f "$$($1_$2)$$(EXESUFFIX)" "$$($1_$2_proper).app/Contents/MacOS/"
 endif
 ifeq ($$(PLATFORM),SWITCH)
-	nacptool --create "Duke Nukem 3D" "Cpasjuste" "1.4" $$($1_$2).nacp
+	nacptool --create "Duke Nukem 3D" "Cpasjuste" "1.5" $$($1_$2).nacp
 	elf2nro $$@ $$($1_$2).nro --icon=platform/Switch/icon.jpg --nacp=$$($1_$2).nacp
 endif
 
